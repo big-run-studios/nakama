@@ -163,7 +163,7 @@ func (s *RedisSessionCache) Get(userID uuid.UUID) *CachedUser {
 	}
 
 	var cachedUser CachedUser
-	if err = json.Unmarshal(serializedUser, cachedUser); err != nil {
+	if err = json.Unmarshal(serializedUser, &cachedUser); err != nil {
 		s.logger.Error("Error deserializing user from cache.", zap.Error(err), zap.String("userId", userID.String()))
 		return nil
 	}
