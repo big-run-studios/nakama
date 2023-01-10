@@ -48,6 +48,7 @@ type Config interface {
 	GetLeaderboard() *LeaderboardConfig
 	GetMatchmaker() *MatchmakerConfig
 	GetIAP() *IAPConfig
+	GetCache() *CacheConfig
 
 	Clone() (Config, error)
 }
@@ -421,6 +422,7 @@ type config struct {
 	Leaderboard      *LeaderboardConfig `yaml:"leaderboard" json:"leaderboard" usage:"Leaderboard settings."`
 	Matchmaker       *MatchmakerConfig  `yaml:"matchmaker" json:"matchmaker" usage:"Matchmaker settings."`
 	IAP              *IAPConfig         `yaml:"iap" json:"iap" usage:"In-App Purchase settings."`
+	Cache            *CacheConfig       `yaml:"cache" json:"cache" usage:"Cache settings."`
 }
 
 // NewConfig constructs a Config struct which represents server settings, and populates it with default values.
@@ -568,6 +570,10 @@ func (c *config) GetMatchmaker() *MatchmakerConfig {
 
 func (c *config) GetIAP() *IAPConfig {
 	return c.IAP
+}
+
+func (c *config) GetCache() *CacheConfig {
+	return c.Cache
 }
 
 // LoggerConfig is configuration relevant to logging levels and output.
@@ -948,6 +954,13 @@ type IAPConfig struct {
 	Apple  *IAPAppleConfig  `yaml:"apple" json:"apple" usage:"Apple App Store purchase validation configuration."`
 	Google *IAPGoogleConfig `yaml:"google" json:"google" usage:"Google Play Store purchase validation configuration."`
 	Huawei *IAPHuaweiConfig `yaml:"huawei" json:"huawei" usage:"Huawei purchase validation configuration."`
+}
+
+type CacheConfig struct {
+	CacheName string `yaml:"cache_name" json:"cache_name" usage:"Name of the cache. Used in cache keys."`
+	Address   string `yaml:"address" json:"address" usage:"Address (hostname+port) of the redis server used for cache purposes."`
+	Password  string `yaml:"password" json:"password" usage:"Password of the redis server used for cache purposes."`
+	EnableTls bool   `yaml:"enable_tls" json:"enable_tls" usage:"Whether the host require TLS enabled of not."`
 }
 
 func NewIAPConfig() *IAPConfig {
