@@ -104,7 +104,7 @@ func (s *RedisSessionCache) IsValidSession(userID uuid.UUID, exp int64, token st
 		return false
 	}
 
-	return cachedUser.sessionExp >= time.Now().UTC().Unix()
+	return cachedUser.SessionExp >= time.Now().UTC().Unix()
 }
 
 func (s *RedisSessionCache) IsValidRefresh(userID uuid.UUID, exp int64, token string) bool {
@@ -117,7 +117,7 @@ func (s *RedisSessionCache) IsValidRefresh(userID uuid.UUID, exp int64, token st
 		return false
 	}
 
-	return cachedUser.refreshExp >= time.Now().UTC().Unix()
+	return cachedUser.RefreshExp >= time.Now().UTC().Unix()
 }
 
 func (s *RedisSessionCache) Add(userID uuid.UUID, sessionExp int64, sessionToken string, refreshExp int64, refreshToken string) {
@@ -127,11 +127,11 @@ func (s *RedisSessionCache) Add(userID uuid.UUID, sessionExp int64, sessionToken
 	}
 
 	cachedUser := CachedUser{
-		userId:       userID,
-		sessionExp:   sessionExp,
-		sessionToken: sessionToken,
-		refreshExp:   refreshExp,
-		refreshToken: refreshToken,
+		UserId:       userID.String(),
+		SessionExp:   sessionExp,
+		SessionToken: sessionToken,
+		RefreshExp:   refreshExp,
+		RefreshToken: refreshToken,
 	}
 
 	data, err := json.Marshal(cachedUser)
@@ -219,11 +219,11 @@ func (s *RedisSessionCache) Unban(userIDs []uuid.UUID) {}
 
 // CachedUser is used to serialize/deserialize the user stored in cache
 type CachedUser struct {
-	userId       uuid.UUID `json:"user_id"`
-	sessionExp   int64     `json:"session_exp"`
-	sessionToken string    `json:"session_token"`
-	refreshExp   int64     `json:"refresh_exp"`
-	refreshToken string    `json:"refresh_token"`
+	UserId       string `json:"user_id"`
+	SessionExp   int64  `json:"session_exp"`
+	SessionToken string `json:"session_token"`
+	RefreshExp   int64  `json:"refresh_exp"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 // getUserKey given a userId returns the corresponding key to be use in cache
