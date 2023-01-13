@@ -60,6 +60,52 @@ func TestEncodeDecode(t *testing.T) {
 	t.Log("ok")
 }
 
+func TestEncodeDecodePresences(t *testing.T) {
+	presences := []runtime.Presence{
+		&Presence{
+			ID: PresenceID{
+				Node:      "nakama",
+				SessionID: uuid.Must(uuid.NewV4()),
+			},
+			Stream: PresenceStream{
+				Mode:    StreamModeMatchAuthoritative,
+				Subject: uuid.Must(uuid.NewV4()),
+				Label:   "nakama",
+			},
+			UserID: uuid.Must(uuid.NewV4()),
+			Meta: PresenceMeta{
+				Username: "username1",
+			},
+		},
+		&Presence{
+			ID: PresenceID{
+				Node:      "nakama",
+				SessionID: uuid.Must(uuid.NewV4()),
+			},
+			Stream: PresenceStream{
+				Mode:    StreamModeMatchAuthoritative,
+				Subject: uuid.Must(uuid.NewV4()),
+				Label:   "nakama",
+			},
+			UserID: uuid.Must(uuid.NewV4()),
+			Meta: PresenceMeta{
+				Username: "username2",
+			},
+		},
+	}
+	params := map[string]interface{}{
+		"presences": presences,
+	}
+	buf := &bytes.Buffer{}
+	if err := gob.NewEncoder(buf).Encode(params); err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if err := gob.NewDecoder(buf).Decode(&params); err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	t.Log("ok")
+}
+
 // should create authoritative match, and join with metadata
 func TestMatchRegistryAuthoritativeMatchAndJoin(t *testing.T) {
 	consoleLogger := loggerForTest(t)
@@ -69,7 +115,7 @@ func TestMatchRegistryAuthoritativeMatchAndJoin(t *testing.T) {
 	}
 	defer matchRegistry.Stop(0)
 
-	res, err := matchRegistry.CreateMatch(context.Background(), consoleLogger,
+	res, err := matchRegistry.CreateMatch(context.Background(),
 		runtimeMatchCreateFunc, "match", map[string]interface{}{})
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +147,7 @@ func TestMatchRegistryAuthoritativeMatchAndListMatches(t *testing.T) {
 	}
 	defer matchRegistry.Stop(0)
 
-	_, err = matchRegistry.CreateMatch(context.Background(), consoleLogger,
+	_, err = matchRegistry.CreateMatch(context.Background(),
 		runtimeMatchCreateFunc, "match", map[string]interface{}{
 			"label": "label",
 		})
@@ -111,8 +157,8 @@ func TestMatchRegistryAuthoritativeMatchAndListMatches(t *testing.T) {
 
 	matchRegistry.processLabelUpdates(bluge.NewBatch())
 
-	matches, err := matchRegistry.ListMatches(context.Background(), 2, wrapperspb.Bool(true),
-		wrapperspb.String("label"), wrapperspb.Int32(0), wrapperspb.Int32(5), nil)
+	matches, _, err := matchRegistry.ListMatches(context.Background(), 2, wrapperspb.Bool(true),
+		wrapperspb.String("label"), wrapperspb.Int32(0), wrapperspb.Int32(5), nil, nil)
 	if len(matches) != 1 {
 		t.Fatalf("expected one match, got %d", len(matches))
 	}
@@ -136,7 +182,7 @@ func TestMatchRegistryAuthoritativeMatchAndListMatchesWithTokenizableLabel(t *te
 	}
 	defer matchRegistry.Stop(0)
 
-	_, err = matchRegistry.CreateMatch(context.Background(), consoleLogger,
+	_, err = matchRegistry.CreateMatch(context.Background(),
 		runtimeMatchCreateFunc, "match", map[string]interface{}{
 			"label": "label-part2",
 		})
@@ -146,8 +192,8 @@ func TestMatchRegistryAuthoritativeMatchAndListMatchesWithTokenizableLabel(t *te
 
 	matchRegistry.processLabelUpdates(bluge.NewBatch())
 
-	matches, err := matchRegistry.ListMatches(context.Background(), 2, wrapperspb.Bool(true),
-		wrapperspb.String("label-part2"), wrapperspb.Int32(0), wrapperspb.Int32(5), nil)
+	matches, _, err := matchRegistry.ListMatches(context.Background(), 2, wrapperspb.Bool(true),
+		wrapperspb.String("label-part2"), wrapperspb.Int32(0), wrapperspb.Int32(5), nil, nil)
 	if len(matches) != 1 {
 		t.Fatalf("expected one match, got %d", len(matches))
 	}
@@ -169,7 +215,7 @@ func TestMatchRegistryAuthoritativeMatchAndListMatchesWithQuerying(t *testing.T)
 	}
 	defer matchRegistry.Stop(0)
 
-	_, err = matchRegistry.CreateMatch(context.Background(), consoleLogger,
+	_, err = matchRegistry.CreateMatch(context.Background(),
 		runtimeMatchCreateFunc, "match", map[string]interface{}{
 			"label": `{"skill":60}`,
 		})
@@ -179,9 +225,9 @@ func TestMatchRegistryAuthoritativeMatchAndListMatchesWithQuerying(t *testing.T)
 
 	matchRegistry.processLabelUpdates(bluge.NewBatch())
 
-	matches, err := matchRegistry.ListMatches(context.Background(), 2, wrapperspb.Bool(true),
+	matches, _, err := matchRegistry.ListMatches(context.Background(), 2, wrapperspb.Bool(true),
 		wrapperspb.String("label"), wrapperspb.Int32(0), wrapperspb.Int32(5),
-		wrapperspb.String("+label.skill:>=50"))
+		wrapperspb.String("+label.skill:>=50"), nil)
 	if len(matches) != 1 {
 		t.Fatalf("expected one match, got %d", len(matches))
 	}
@@ -203,7 +249,7 @@ func TestMatchRegistryAuthoritativeMatchAndListAllMatchesWithQueryStar(t *testin
 	}
 	defer matchRegistry.Stop(0)
 
-	_, err = matchRegistry.CreateMatch(context.Background(), consoleLogger,
+	_, err = matchRegistry.CreateMatch(context.Background(),
 		runtimeMatchCreateFunc, "match", map[string]interface{}{
 			"label": `{"skill":60}`,
 		})
@@ -213,9 +259,9 @@ func TestMatchRegistryAuthoritativeMatchAndListAllMatchesWithQueryStar(t *testin
 
 	matchRegistry.processLabelUpdates(bluge.NewBatch())
 
-	matches, err := matchRegistry.ListMatches(context.Background(), 2, wrapperspb.Bool(true),
+	matches, _, err := matchRegistry.ListMatches(context.Background(), 2, wrapperspb.Bool(true),
 		wrapperspb.String("label"), wrapperspb.Int32(0), wrapperspb.Int32(5),
-		wrapperspb.String("*"))
+		wrapperspb.String("*"), nil)
 	if len(matches) != 1 {
 		t.Fatalf("expected one match, got %d", len(matches))
 	}
@@ -241,7 +287,7 @@ func TestMatchRegistryAuthoritativeMatchAndListMatchesWithQueryingArrays(t *test
 	convoID2, _ := uuid.NewV4()
 	convoID3, _ := uuid.NewV4()
 
-	_, err = matchRegistry.CreateMatch(context.Background(), consoleLogger,
+	_, err = matchRegistry.CreateMatch(context.Background(),
 		runtimeMatchCreateFunc, "match", map[string]interface{}{
 			"label": fmt.Sprintf(`{"convo_ids": ["%s", "%s", "%s"]}`, convoID1, convoID2, convoID3),
 		})
@@ -251,9 +297,9 @@ func TestMatchRegistryAuthoritativeMatchAndListMatchesWithQueryingArrays(t *test
 
 	matchRegistry.processLabelUpdates(bluge.NewBatch())
 
-	matches, err := matchRegistry.ListMatches(context.Background(), 2, wrapperspb.Bool(true),
+	matches, _, err := matchRegistry.ListMatches(context.Background(), 2, wrapperspb.Bool(true),
 		wrapperspb.String("label"), wrapperspb.Int32(0), wrapperspb.Int32(5),
-		wrapperspb.String(fmt.Sprintf("+label.convo_ids:%s", convoID2)))
+		wrapperspb.String(fmt.Sprintf("+label.convo_ids:%s", convoID2)), nil)
 	if len(matches) != 1 {
 		t.Fatalf("expected one match, got %d", len(matches))
 	}
@@ -286,7 +332,7 @@ func TestMatchRegistryListMatchesAfterLabelsUpdate(t *testing.T) {
 		return rmc, nil
 	}
 
-	_, err = matchRegistry.CreateMatch(context.Background(), consoleLogger, matchCreateWrapper, "match", nil)
+	_, err = matchRegistry.CreateMatch(context.Background(), matchCreateWrapper, "match", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,9 +340,9 @@ func TestMatchRegistryListMatchesAfterLabelsUpdate(t *testing.T) {
 	rgmc.MatchLabelUpdate(`{"updated_label": 1}`)
 	matchRegistry.processLabelUpdates(bluge.NewBatch())
 
-	matches, err := matchRegistry.ListMatches(context.Background(), 2, wrapperspb.Bool(true),
+	matches, _, err := matchRegistry.ListMatches(context.Background(), 2, wrapperspb.Bool(true),
 		nil, wrapperspb.Int32(0), wrapperspb.Int32(5),
-		wrapperspb.String(`label.updated_label:1`))
+		wrapperspb.String(`label.updated_label:1`), nil)
 	if len(matches) != 1 {
 		t.Fatalf("expected one match, got %d", len(matches))
 	}
@@ -333,7 +379,7 @@ func TestMatchRegistryAuthoritativeMatchAndListMatchesWithQueryingAndBoost(t *te
 
 	// create all matches
 	for _, matchLabel := range matchLabels {
-		_, err = matchRegistry.CreateMatch(context.Background(), consoleLogger,
+		_, err = matchRegistry.CreateMatch(context.Background(),
 			runtimeMatchCreateFunc, "match", map[string]interface{}{
 				"label": matchLabel,
 			})
@@ -397,9 +443,9 @@ func TestMatchRegistryAuthoritativeMatchAndListMatchesWithQueryingAndBoost(t *te
 		test := test
 
 		t.Run(test.name, func(t *testing.T) {
-			matches, err := matchRegistry.ListMatches(context.Background(), 10, wrapperspb.Bool(true),
+			matches, _, err := matchRegistry.ListMatches(context.Background(), 10, wrapperspb.Bool(true),
 				wrapperspb.String("label"), wrapperspb.Int32(0), wrapperspb.Int32(5),
-				wrapperspb.String(test.query))
+				wrapperspb.String(test.query), nil)
 			if err != nil {
 				t.Fatalf("error listing matches: %v", err)
 			}

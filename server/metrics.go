@@ -56,7 +56,11 @@ type Metrics interface {
 	GaugeSessions(value float64)
 	GaugePresences(value float64)
 
+	Matchmaker(tickets, activeTickets float64, processTime time.Duration)
+
 	PresenceEvent(dequeueElapsed, processElapsed time.Duration)
+
+	StorageWriteRejectCount(tags map[string]string, delta int64)
 
 	CustomCounter(name string, tags map[string]string, delta int64)
 	CustomGauge(name string, tags map[string]string, value float64)
@@ -413,11 +417,26 @@ func (m *LocalMetrics) GaugePresences(value float64) {
 	m.PrometheusScope.Gauge("presences").Update(value)
 }
 
+// Record a set of matchmaker metrics.
+func (m *LocalMetrics) Matchmaker(tickets, activeTickets float64, processTime time.Duration) {
+	m.PrometheusScope.Gauge("matchmaker_tickets").Update(tickets)
+	m.PrometheusScope.Gauge("matchmaker_active_tickets").Update(activeTickets)
+	m.PrometheusScope.Timer("matchmaker_process_time").Record(processTime)
+}
+
 // Count presence events and time their processing.
 func (m *LocalMetrics) PresenceEvent(dequeueElapsed, processElapsed time.Duration) {
 	m.PrometheusScope.Counter("presence_event_count").Inc(1)
 	m.PrometheusScope.Timer("presence_event_dequeue_latency_ms").Record(dequeueElapsed)
 	m.PrometheusScope.Timer("presence_event_process_latency_ms").Record(processElapsed)
+}
+
+func (m *LocalMetrics) StorageWriteRejectCount(tags map[string]string, delta int64) {
+	scope := m.PrometheusScope
+	if len(tags) != 0 {
+		scope = scope.Tagged(tags)
+	}
+	scope.Counter("storage_write_reject_count").Inc(delta)
 }
 
 // CustomCounter adds the given delta to a counter with the specified name and tags.

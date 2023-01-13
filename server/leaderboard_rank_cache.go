@@ -144,6 +144,11 @@ func NewLocalLeaderboardRankCache(ctx context.Context, startupLogger *zap.Logger
 				expiryUnix = leaderboard.EndTime
 			}
 
+			if expiryUnix != 0 && expiryUnix <= nowTime.Unix() {
+				// Last scores for this leaderboard have expired, do not cache them.
+				continue
+			}
+
 			// Prepare structure to receive rank data.
 			key := LeaderboardWithExpiry{LeaderboardId: leaderboard.Id, Expiry: expiryUnix}
 			cache.Lock()
@@ -177,7 +182,11 @@ func NewLocalLeaderboardRankCache(ctx context.Context, startupLogger *zap.Logger
 
 				rows, err := db.QueryContext(ctx, query, params...)
 				if err != nil {
-					startupLogger.Error("Failed to caching leaderboard ranks", zap.String("leaderboard_id", leaderboard.Id), zap.Error(err))
+					startupLogger.Error("Failed to cache leaderboard ranks", zap.String("leaderboard_id", leaderboard.Id), zap.Error(err))
+					if err == context.Canceled {
+						// All further queries will fail, no need to continue looping through leaderboards.
+						return
+					}
 					break
 				}
 

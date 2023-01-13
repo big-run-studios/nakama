@@ -14,9 +14,14 @@ services:
     ports:
       - "5432:5432"
       - "8080:8080"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "nakama"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
   nakama:
     container_name: nakama
-    image: heroiclabs/nakama:3.10.0
+    image: registry.heroiclabs.com/heroiclabs/nakama:3.15.0
     entrypoint:
       - "/bin/sh"
       - "-ecx"
@@ -27,7 +32,8 @@ services:
     links:
       - "postgres:db"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     volumes:
       - ./:/nakama/data
     expose:

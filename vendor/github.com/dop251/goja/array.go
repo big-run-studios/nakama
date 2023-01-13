@@ -127,9 +127,6 @@ func (a *arrayObject) setLengthInt(l uint32, throw bool) bool {
 }
 
 func (a *arrayObject) setLength(v uint32, throw bool) bool {
-	if v == a.length {
-		return true
-	}
 	if !a.lengthProp.writable {
 		a.val.runtime.typeErrorResult(throw, "length is not writable")
 		return false
@@ -181,11 +178,11 @@ func (a *arrayObject) getOwnPropIdx(idx valueInt) Value {
 	return a.baseObject.getOwnPropStr(idx.string())
 }
 
-func (a *arrayObject) sortLen() int64 {
-	return int64(len(a.values))
+func (a *arrayObject) sortLen() int {
+	return len(a.values)
 }
 
-func (a *arrayObject) sortGet(i int64) Value {
+func (a *arrayObject) sortGet(i int) Value {
 	v := a.values[i]
 	if p, ok := v.(*valueProperty); ok {
 		v = p.get(a.val)
@@ -193,7 +190,7 @@ func (a *arrayObject) sortGet(i int64) Value {
 	return v
 }
 
-func (a *arrayObject) swap(i, j int64) {
+func (a *arrayObject) swap(i int, j int) {
 	a.values[i], a.values[j] = a.values[j], a.values[i]
 }
 
@@ -201,7 +198,7 @@ func (a *arrayObject) getStr(name unistring.String, receiver Value) Value {
 	return a.getStrWithOwnProp(a.getOwnPropStr(name), name, receiver)
 }
 
-func (a *arrayObject) getLengthProp() Value {
+func (a *arrayObject) getLengthProp() *valueProperty {
 	a.lengthProp.value = intToValue(int64(a.length))
 	return &a.lengthProp
 }
@@ -382,7 +379,10 @@ func (r *Runtime) defineArrayLength(prop *valueProperty, descr PropertyDescripto
 	}
 
 	if descr.Value != nil {
-		ret = setter(newLen, false)
+		oldLen := uint32(prop.value.ToInteger())
+		if oldLen != newLen {
+			ret = setter(newLen, false)
+		}
 	} else {
 		ret = true
 	}
@@ -437,7 +437,7 @@ func (a *arrayObject) defineOwnPropertyStr(name unistring.String, descr Property
 		return a._defineIdxProperty(idx, descr, throw)
 	}
 	if name == "length" {
-		return a.val.runtime.defineArrayLength(&a.lengthProp, descr, a.setLength, throw)
+		return a.val.runtime.defineArrayLength(a.getLengthProp(), descr, a.setLength, throw)
 	}
 	return a.baseObject.defineOwnPropertyStr(name, descr, throw)
 }
@@ -511,12 +511,12 @@ func (a *arrayObject) exportToArrayOrSlice(dst reflect.Value, typ reflect.Type, 
 	r := a.val.runtime
 	if iter := a.getSym(SymIterator, nil); iter == r.global.arrayValues || iter == nil {
 		l := toIntStrict(int64(a.length))
-		if dst.Len() != l {
-			if typ.Kind() == reflect.Array {
+		if typ.Kind() == reflect.Array {
+			if dst.Len() != l {
 				return fmt.Errorf("cannot convert an Array into an array, lengths mismatch (have %d, need %d)", l, dst.Len())
-			} else {
-				dst.Set(reflect.MakeSlice(typ, l, l))
 			}
+		} else {
+			dst.Set(reflect.MakeSlice(typ, l, l))
 		}
 		ctx.putTyped(a.val, typ, dst.Interface())
 		for i := 0; i < l; i++ {

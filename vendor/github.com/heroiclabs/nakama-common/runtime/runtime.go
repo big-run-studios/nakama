@@ -61,22 +61,22 @@ This function is guaranteed to ever be invoked once during the uptime of the ser
 
 To setup your own project to build modules for the game server you can follow these steps.
 
-1. Build Nakama from source:
-	go get -d github.com/heroiclabs/nakama-common
-	cd $GOPATH/src/github.com/heroiclabs/nakama-common
-	env CGO_ENABLED=1 go build
+ 1. Build Nakama from source:
+    go get -d github.com/heroiclabs/nakama-common
+    cd $GOPATH/src/github.com/heroiclabs/nakama-common
+    env CGO_ENABLED=1 go build
 
-2. Setup a folder for your own server code:
-	mkdir -p $GOPATH/src/some_project
-	cd $GOPATH/src/some_project
+ 2. Setup a folder for your own server code:
+    mkdir -p $GOPATH/src/some_project
+    cd $GOPATH/src/some_project
 
-3. Build your plugin as a shared object:
-	go build --buildmode=plugin -o ./modules/some_project.so
+ 3. Build your plugin as a shared object:
+    go build --buildmode=plugin -o ./modules/some_project.so
 
 NOTE: It is not possible to build plugins on Windows with the native compiler toolchain but they can be cross-compiled and run with Docker.
 
-4. Start Nakama with your module:
-	$GOPATH/src/github.com/heroiclabs/nakama-common/nakama --runtime.path $GOPATH/src/plugin_project/modules
+ 4. Start Nakama with your module:
+    $GOPATH/src/github.com/heroiclabs/nakama-common/nakama --runtime.path $GOPATH/src/plugin_project/modules
 
 TIP: You don't have to install Nakama from source but you still need to have the `api`, `rtapi` and `runtime` packages from Nakama on your `GOPATH`. Heroic Labs also offers a docker plugin-builder image that streamlines the plugin workflow.
 
@@ -110,6 +110,9 @@ const (
 
 	// The node ID where the current runtime context is executing.
 	RUNTIME_CTX_NODE = "node"
+
+	// Server version.
+	RUNTIME_CTX_VERSION = "version"
 
 	// Http headers. Only applicable to HTTP RPC requests.
 	RUNTIME_CTX_HEADERS = "headers"
@@ -238,6 +241,7 @@ Error is used to indicate a failure in code. The message and code are returned t
 If an Error is used as response for a HTTP/gRPC request, then the server tries to use the error value as the gRPC error code. This will in turn translate to HTTP status codes.
 
 For more information, please have a look at the following:
+
 	https://github.com/grpc/grpc-go/blob/master/codes/codes.go
 	https://github.com/grpc-ecosystem/grpc-gateway/blob/master/runtime/errors.go
 	https://golang.org/pkg/net/http/
@@ -254,6 +258,7 @@ func (e *Error) Error() string {
 
 /*
 NewError returns a new error. The message and code are sent directly to the client. The code field is also optionally translated to gRPC/HTTP code.
+
 	runtime.NewError("Server unavailable", 14) // 14 = Unavailable = 503 HTTP status code
 */
 func NewError(message string, code int) *Error {
@@ -343,6 +348,18 @@ type Initializer interface {
 	// RegisterLeaderboardReset
 	RegisterLeaderboardReset(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, leaderboard *api.Leaderboard, reset int64) error) error
 
+	// RegisterPurchaseNotificationApple
+	RegisterPurchaseNotificationApple(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, purchase *api.ValidatedPurchase, providerPayload string) error) error
+
+	// RegisterSubscriptionNotificationApple
+	RegisterSubscriptionNotificationApple(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, subscription *api.ValidatedSubscription, providerPayload string) error) error
+
+	// RegisterPurchaseNotificationGoogle
+	RegisterPurchaseNotificationGoogle(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, purchase *api.ValidatedPurchase, providerPayload string) error) error
+
+	// RegisterSubscriptionNotificationGoogle
+	RegisterSubscriptionNotificationGoogle(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, subscription *api.ValidatedSubscription, providerPayload string) error) error
+
 	// RegisterBeforeGetAccount is used to register a function invoked when the server receives the relevant request.
 	RegisterBeforeGetAccount(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule) error) error
 
@@ -354,6 +371,12 @@ type Initializer interface {
 
 	// RegisterAfterUpdateAccount is used to register a function invoked after the server processes the relevant request.
 	RegisterAfterUpdateAccount(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, in *api.UpdateAccountRequest) error) error
+
+	// RegisterBeforeDeleteAccount is used to register a function invoked when the server receives the relevant request.
+	RegisterBeforeDeleteAccount(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule) error) error
+
+	// RegisterAfterDeleteAccount is used to register a function invoked after the server processes the relevant request.
+	RegisterAfterDeleteAccount(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule) error) error
 
 	// RegisterBeforeSessionRefresh can be used to perform pre-refresh checks.
 	RegisterBeforeSessionRefresh(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, in *api.SessionRefreshRequest) (*api.SessionRefreshRequest, error)) error
@@ -633,11 +656,11 @@ type Initializer interface {
 	// RegisterAfterListNotifications can be used to perform additional logic after listing notifications for a user.
 	RegisterAfterListNotifications(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, out *api.NotificationList, in *api.ListNotificationsRequest) error) error
 
-	// RegisterBeforeDeleteNotification can be used to perform additional logic before deleting notifications.
-	RegisterBeforeDeleteNotification(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, in *api.DeleteNotificationsRequest) (*api.DeleteNotificationsRequest, error)) error
+	// RegisterBeforeDeleteNotifications can be used to perform additional logic before deleting notifications.
+	RegisterBeforeDeleteNotifications(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, in *api.DeleteNotificationsRequest) (*api.DeleteNotificationsRequest, error)) error
 
-	// RegisterAfterDeleteNotification can be used to perform additional logic after deleting notifications.
-	RegisterAfterDeleteNotification(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, in *api.DeleteNotificationsRequest) error) error
+	// RegisterAfterDeleteNotifications can be used to perform additional logic after deleting notifications.
+	RegisterAfterDeleteNotifications(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, in *api.DeleteNotificationsRequest) error) error
 
 	// RegisterBeforeListStorageObjects can be used to perform additional logic before listing storage objects.
 	RegisterBeforeListStorageObjects(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, in *api.ListStorageObjectsRequest) (*api.ListStorageObjectsRequest, error)) error
@@ -699,17 +722,41 @@ type Initializer interface {
 	// RegisterAfterValidatePurchaseApple can be used to perform additional logic after validating an Apple Store IAP receipt.
 	RegisterAfterValidatePurchaseApple(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, out *api.ValidatePurchaseResponse, in *api.ValidatePurchaseAppleRequest) error) error
 
+	// RegisterBeforeValidateSubscriptionApple can be used to perform additional logic before validation an Apple Store Subscription receipt.
+	RegisterBeforeValidateSubscriptionApple(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, in *api.ValidateSubscriptionAppleRequest) (*api.ValidateSubscriptionAppleRequest, error)) error
+
+	// RegisterAfterValidateSubscriptionApple can be used to perform additional logic after validation an Apple Store Subscription receipt.
+	RegisterAfterValidateSubscriptionApple(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, out *api.ValidateSubscriptionResponse, in *api.ValidateSubscriptionAppleRequest) error) error
+
 	// RegisterBeforeValidatePurchaseGoogle can be used to perform additional logic before validating a Google Play Store IAP receipt.
 	RegisterBeforeValidatePurchaseGoogle(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, in *api.ValidatePurchaseGoogleRequest) (*api.ValidatePurchaseGoogleRequest, error)) error
 
 	// RegisterAfterValidatePurchaseGoogle can be used to perform additional logic after validating a Google Play Store IAP receipt.
 	RegisterAfterValidatePurchaseGoogle(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, out *api.ValidatePurchaseResponse, in *api.ValidatePurchaseGoogleRequest) error) error
 
+	// RegisterBeforeValidateSubscriptionGoogle can be used to perform additional logic before validation an Google Store Subscription receipt.
+	RegisterBeforeValidateSubscriptionGoogle(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, in *api.ValidateSubscriptionGoogleRequest) (*api.ValidateSubscriptionGoogleRequest, error)) error
+
+	// RegisterAfterValidateSubscriptionGoogle can be used to perform additional logic after validation an Google Store Subscription receipt.
+	RegisterAfterValidateSubscriptionGoogle(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, out *api.ValidateSubscriptionResponse, in *api.ValidateSubscriptionGoogleRequest) error) error
+
 	// RegisterBeforeValidatePurchaseHuawei can be used to perform additional logic before validating an Huawei App Gallery IAP receipt.
 	RegisterBeforeValidatePurchaseHuawei(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, in *api.ValidatePurchaseHuaweiRequest) (*api.ValidatePurchaseHuaweiRequest, error)) error
 
 	// RegisterAfterValidatePurchaseHuawei can be used to perform additional logic after validating an Huawei App Gallery IAP receipt.
 	RegisterAfterValidatePurchaseHuawei(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, out *api.ValidatePurchaseResponse, in *api.ValidatePurchaseHuaweiRequest) error) error
+
+	// RegisterBeforeListSubscriptions can be used to perform additional logic before listing subscriptions.
+	RegisterBeforeListSubscriptions(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, in *api.ListSubscriptionsRequest) (*api.ListSubscriptionsRequest, error)) error
+
+	// RegisterAfterListSubscriptions can be used to perform additional logic after listing subscriptions.
+	RegisterAfterListSubscriptions(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, out *api.SubscriptionList, in *api.ListSubscriptionsRequest) error) error
+
+	// RegisterBeforeGetSubscription can be used to perform additional logic before listing subscriptions.
+	RegisterBeforeGetSubscription(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, in *api.GetSubscriptionRequest) (*api.GetSubscriptionRequest, error)) error
+
+	// RegisterAfterGetSubscription can be used to perform additional logic after listing subscriptions.
+	RegisterAfterGetSubscription(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, out *api.ValidatedSubscription, in *api.GetSubscriptionRequest) error) error
 
 	// RegisterBeforeUnlinkApple can be used to perform additional logic before Apple ID is unlinked from an account.
 	RegisterBeforeUnlinkApple(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, in *api.AccountApple) (*api.AccountApple, error)) error
@@ -858,6 +905,11 @@ type NotificationSend struct {
 	Persistent bool
 }
 
+type NotificationDelete struct {
+	UserID         string
+	NotificationID string
+}
+
 type WalletUpdate struct {
 	UserID    string
 	Changeset map[string]int64
@@ -991,6 +1043,7 @@ type NakamaModule interface {
 	NotificationSend(ctx context.Context, userID, subject string, content map[string]interface{}, code int, sender string, persistent bool) error
 	NotificationsSend(ctx context.Context, notifications []*NotificationSend) error
 	NotificationSendAll(ctx context.Context, subject string, content map[string]interface{}, code int, persistent bool) error
+	NotificationsDelete(ctx context.Context, notifications []*NotificationDelete) error
 
 	WalletUpdate(ctx context.Context, userID string, changeset map[string]int64, metadata map[string]interface{}, updateLedger bool) (updated map[string]int64, previous map[string]int64, err error)
 	WalletsUpdate(ctx context.Context, updates []*WalletUpdate, updateLedger bool) ([]*WalletUpdateResult, error)
@@ -1011,7 +1064,7 @@ type NakamaModule interface {
 	LeaderboardRecordWrite(ctx context.Context, id, ownerID, username string, score, subscore int64, metadata map[string]interface{}, overrideOperator *int) (*api.LeaderboardRecord, error)
 	LeaderboardRecordDelete(ctx context.Context, id, ownerID string) error
 	LeaderboardsGetId(ctx context.Context, ids []string) ([]*api.Leaderboard, error)
-	LeaderboardRecordsHaystack(ctx context.Context, id, ownerID string, limit int, expiry int64) ([]*api.LeaderboardRecord, error)
+	LeaderboardRecordsHaystack(ctx context.Context, id, ownerID string, limit int, cursor string, expiry int64) (*api.LeaderboardRecordList, error)
 
 	PurchaseValidateApple(ctx context.Context, userID, receipt string, persist bool, passwordOverride ...string) (*api.ValidatePurchaseResponse, error)
 	PurchaseValidateGoogle(ctx context.Context, userID, receipt string, persist bool, overrides ...struct {
@@ -1030,7 +1083,7 @@ type NakamaModule interface {
 	TournamentList(ctx context.Context, categoryStart, categoryEnd, startTime, endTime, limit int, cursor string) (*api.TournamentList, error)
 	TournamentRecordsList(ctx context.Context, tournamentId string, ownerIDs []string, limit int, cursor string, overrideExpiry int64) (records []*api.LeaderboardRecord, ownerRecords []*api.LeaderboardRecord, prevCursor string, nextCursor string, err error)
 	TournamentRecordWrite(ctx context.Context, id, ownerID, username string, score, subscore int64, metadata map[string]interface{}, operatorOverride *int) (*api.LeaderboardRecord, error)
-	TournamentRecordsHaystack(ctx context.Context, id, ownerID string, limit int, expiry int64) ([]*api.LeaderboardRecord, error)
+	TournamentRecordsHaystack(ctx context.Context, id, ownerID string, limit int, cursor string, expiry int64) (*api.TournamentRecordList, error)
 
 	GroupsGetId(ctx context.Context, groupIDs []string) ([]*api.Group, error)
 	GroupCreate(ctx context.Context, userID, name, creatorID, langTag, description, avatarUrl string, open bool, metadata map[string]interface{}, maxCount int) (*api.Group, error)
@@ -1045,11 +1098,13 @@ type NakamaModule interface {
 	GroupUsersDemote(ctx context.Context, callerID, groupID string, userIDs []string) error
 	GroupUsersList(ctx context.Context, id string, limit int, state *int, cursor string) ([]*api.GroupUserList_GroupUser, string, error)
 	GroupsList(ctx context.Context, name, langTag string, members *int, open *bool, limit int, cursor string) ([]*api.Group, string, error)
+	GroupsGetRandom(ctx context.Context, count int) ([]*api.Group, error)
 	UserGroupsList(ctx context.Context, userID string, limit int, state *int, cursor string) ([]*api.UserGroupList_UserGroup, string, error)
 
 	FriendsList(ctx context.Context, userID string, limit int, state *int, cursor string) ([]*api.Friend, string, error)
 	FriendsAdd(ctx context.Context, userID string, username string, ids []string, usernames []string) error
 	FriendsDelete(ctx context.Context, userID string, username string, ids []string, usernames []string) error
+	FriendsBlock(ctx context.Context, userID string, username string, ids []string, usernames []string) error
 
 	Event(ctx context.Context, evt *api.Event) error
 
@@ -1060,4 +1115,6 @@ type NakamaModule interface {
 	ChannelIdBuild(ctx context.Context, sender string, target string, chanType ChannelType) (string, error)
 	ChannelMessageSend(ctx context.Context, channelID string, content map[string]interface{}, senderId, senderUsername string, persist bool) (*rtapi.ChannelMessageAck, error)
 	ChannelMessageUpdate(ctx context.Context, channelID, messageID string, content map[string]interface{}, senderId, senderUsername string, persist bool) (*rtapi.ChannelMessageAck, error)
+	ChannelMessageRemove(ctx context.Context, channelId, messageId string, senderId, senderUsername string, persist bool) (*rtapi.ChannelMessageAck, error)
+	ChannelMessagesList(ctx context.Context, channelId string, limit int, forward bool, cursor string) (messages []*api.ChannelMessage, nextCursor string, prevCursor string, err error)
 }

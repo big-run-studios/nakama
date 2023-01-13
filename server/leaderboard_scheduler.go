@@ -68,7 +68,7 @@ type LocalLeaderboardScheduler struct {
 
 func NewLocalLeaderboardScheduler(logger *zap.Logger, db *sql.DB, config Config, cache LeaderboardCache, rankCache LeaderboardRankCache) LeaderboardScheduler {
 	ctx, ctxCancelFn := context.WithCancel(context.Background())
-	return &LocalLeaderboardScheduler{
+	s := &LocalLeaderboardScheduler{
 		logger:    logger,
 		db:        db,
 		config:    config,
@@ -86,6 +86,23 @@ func NewLocalLeaderboardScheduler(logger *zap.Logger, db *sql.DB, config Config,
 		ctx:         ctx,
 		ctxCancelFn: ctxCancelFn,
 	}
+
+	// Ensure trimming of expired scores that don't have resets or functions attached.
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case t := <-ticker.C:
+				s.rankCache.TrimExpired(t.Unix())
+			}
+		}
+	}()
+
+	return s
 }
 
 func (ls *LocalLeaderboardScheduler) Start(runtime *Runtime) {
@@ -108,7 +125,7 @@ func (ls *LocalLeaderboardScheduler) Start(runtime *Runtime) {
 func (ls *LocalLeaderboardScheduler) Pause() {
 	ls.logger.Info("Leaderboard scheduler pause")
 
-	if !ls.active.CAS(1, 0) {
+	if !ls.active.CompareAndSwap(1, 0) {
 		// Already paused.
 		return
 	}
@@ -136,7 +153,7 @@ func (ls *LocalLeaderboardScheduler) Pause() {
 func (ls *LocalLeaderboardScheduler) Resume() {
 	ls.logger.Info("Leaderboard scheduler resume")
 
-	if !ls.active.CAS(0, 1) {
+	if !ls.active.CompareAndSwap(0, 1) {
 		// Already active.
 		return
 	}

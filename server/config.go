@@ -18,7 +18,6 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -27,7 +26,7 @@ import (
 
 	"github.com/heroiclabs/nakama/v3/flags"
 	"go.uber.org/zap"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 // Config interface is the Nakama core configuration.
@@ -71,7 +70,7 @@ func ParseArgs(logger *zap.Logger, args []string) Config {
 	mainConfig := NewConfig(logger)
 	runtimeEnvironment := mainConfig.GetRuntime().Environment
 	for _, cfg := range configFilePath.Config {
-		data, err := ioutil.ReadFile(cfg)
+		data, err := os.ReadFile(cfg)
 		if err != nil {
 			logger.Fatal("Could not read config file", zap.String("path", cfg), zap.Error(err))
 		}
@@ -155,8 +154,8 @@ func CheckConfig(logger *zap.Logger, config Config) map[string]string {
 	if config.GetConsole().IdleTimeoutMs < 1 {
 		logger.Fatal("Console idle timeout milliseconds must be >= 1", zap.Int("console.idle_timeout_ms", config.GetConsole().IdleTimeoutMs))
 	}
-	if config.GetConsole().Username == "" {
-		logger.Fatal("Console username must be set", zap.String("param", "console.username"))
+	if config.GetConsole().Username == "" || !usernameRegex.MatchString(config.GetConsole().Username) {
+		logger.Fatal("Console username must be set and valid", zap.String("param", "console.username"))
 	}
 	if config.GetConsole().Password == "" {
 		logger.Fatal("Console password must be set", zap.String("param", "console.password"))
@@ -278,6 +277,9 @@ func CheckConfig(logger *zap.Logger, config Config) map[string]string {
 	if config.GetMatchmaker().BatchPoolSize < 1 {
 		logger.Fatal("Matchmaker batch pool size must be >= 1", zap.Int("matchmaker.batch_pool_size", config.GetMatchmaker().BatchPoolSize))
 	}
+	if config.GetMatchmaker().RevThreshold < 0 {
+		logger.Fatal("Matchmaker reverse matching threshold must be >= 0", zap.Int("matchmaker.rev_threshold", config.GetMatchmaker().RevThreshold))
+	}
 
 	// If the runtime path is not overridden, set it to `datadir/modules`.
 	if config.GetRuntime().Path == "" {
@@ -293,6 +295,12 @@ func CheckConfig(logger *zap.Logger, config Config) map[string]string {
 		}
 		if filepath.Ext(info.Name()) != ".js" {
 			logger.Fatal("JavaScript entrypoint must point to a .js file", zap.String("runtime.js_entrypoint", p))
+		}
+	}
+
+	if config.GetIAP().Google.RefundCheckPeriodMin != 0 {
+		if config.GetIAP().Google.RefundCheckPeriodMin < 15 {
+			logger.Fatal("Google IAP refund check period must be >= 15 min")
 		}
 	}
 
@@ -350,6 +358,17 @@ func CheckConfig(logger *zap.Logger, config Config) map[string]string {
 		configWarnings["runtime.read_only_globals"] = "Deprecated configuration parameter"
 	}
 
+	if l := len(config.GetSocket().ResponseHeaders); l > 0 {
+		config.GetSocket().Headers = make(map[string]string, l)
+		for _, header := range config.GetSocket().ResponseHeaders {
+			parts := strings.SplitN(header, "=", 2)
+			if len(parts) != 2 {
+				logger.Fatal("Response headers configuration invalid, format must be 'key=value'", zap.String("param", "socket.response_headers"))
+			}
+			config.GetSocket().Headers[parts[0]] = parts[1]
+		}
+	}
+
 	// Log warnings for SSL usage.
 	if config.GetSocket().SSLCertificate != "" && config.GetSocket().SSLPrivateKey == "" {
 		logger.Fatal("SSL configuration invalid, specify both socket.ssl_certificate and socket.ssl_private_key", zap.String("param", "socket.ssl_certificate"))
@@ -359,11 +378,11 @@ func CheckConfig(logger *zap.Logger, config Config) map[string]string {
 	}
 	if config.GetSocket().SSLCertificate != "" && config.GetSocket().SSLPrivateKey != "" {
 		logger.Warn("WARNING: enabling direct SSL termination is not recommended, use an SSL-capable proxy or load balancer for production!")
-		certPEMBlock, err := ioutil.ReadFile(config.GetSocket().SSLCertificate)
+		certPEMBlock, err := os.ReadFile(config.GetSocket().SSLCertificate)
 		if err != nil {
 			logger.Fatal("Error loading SSL certificate cert file", zap.Error(err))
 		}
-		keyPEMBlock, err := ioutil.ReadFile(config.GetSocket().SSLPrivateKey)
+		keyPEMBlock, err := os.ReadFile(config.GetSocket().SSLPrivateKey)
 		if err != nil {
 			logger.Fatal("Error loading SSL certificate key file", zap.Error(err))
 		}
@@ -585,7 +604,6 @@ type LoggerConfig struct {
 	Format     string `yaml:"format" json:"format" usage:"Set logging output format. Can either be 'JSON' or 'Stackdriver'. Default is 'JSON'."`
 }
 
-// NewLoggerConfig creates a new LoggerConfig struct.
 func NewLoggerConfig() *LoggerConfig {
 	return &LoggerConfig{
 		Level:      "info",
@@ -610,7 +628,6 @@ type MetricsConfig struct {
 	CustomPrefix     string `yaml:"custom_prefix" json:"custom_prefix" usage:"Prefix for custom runtime metric names. Default is 'custom', empty string '' disables the prefix."`
 }
 
-// NewMetricsConfig creates a new MatricsConfig struct.
 func NewMetricsConfig() *MetricsConfig {
 	return &MetricsConfig{
 		ReportingFreqSec: 60,
@@ -631,7 +648,6 @@ type SessionConfig struct {
 	SingleMatch           bool   `yaml:"single_match" json:"single_match" usage:"Only allow one match per user. Older matches receive a leave. Requires single socket to enable. Default false."`
 }
 
-// NewSessionConfig creates a new SessionConfig struct.
 func NewSessionConfig() *SessionConfig {
 	return &SessionConfig{
 		EncryptionKey:         "defaultencryptionkey",
@@ -661,12 +677,13 @@ type SocketConfig struct {
 	OutgoingQueueSize    int               `yaml:"outgoing_queue_size" json:"outgoing_queue_size" usage:"The maximum number of messages waiting to be sent to the client. If this is exceeded the client is considered too slow and will disconnect. Used when processing real-time connections."`
 	SSLCertificate       string            `yaml:"ssl_certificate" json:"ssl_certificate" usage:"Path to certificate file if you want the server to use SSL directly. Must also supply ssl_private_key. NOT recommended for production use."`
 	SSLPrivateKey        string            `yaml:"ssl_private_key" json:"ssl_private_key" usage:"Path to private key file if you want the server to use SSL directly. Must also supply ssl_certificate. NOT recommended for production use."`
+	ResponseHeaders      []string          `yaml:"response_headers" json:"response_headers" usage:"Additional headers to send to clients with every response. Values here are only used if the response would not otherwise contain a value for the specified headers."`
+	Headers              map[string]string `yaml:"-" json:"-"` // Created by parsing ResponseHeaders above, not set from input args directly.
 	CertPEMBlock         []byte            `yaml:"-" json:"-"` // Created by fully reading the file contents of SSLCertificate, not set from input args directly.
 	KeyPEMBlock          []byte            `yaml:"-" json:"-"` // Created by fully reading the file contents of SSLPrivateKey, not set from input args directly.
 	TLSCert              []tls.Certificate `yaml:"-" json:"-"` // Created by processing CertPEMBlock and KeyPEMBlock, not set from input args directly.
 }
 
-// NewTransportConfig creates a new TransportConfig struct.
 func NewSocketConfig() *SocketConfig {
 	return &SocketConfig{
 		ServerKey:            "defaultkey",
@@ -699,7 +716,6 @@ type DatabaseConfig struct {
 	DnsScanIntervalSec int      `yaml:"dns_scan_interval_sec" json:"dns_scan_interval_sec" usage:"Number of seconds between scans looking for DNS resolution changes for the database hostname. Default 60."`
 }
 
-// NewDatabaseConfig creates a new DatabaseConfig struct.
 func NewDatabaseConfig() *DatabaseConfig {
 	return &DatabaseConfig{
 		Addresses:          []string{"root@localhost:26257"},
@@ -739,7 +755,6 @@ type SocialConfigApple struct {
 	BundleId string `yaml:"bundle_id" json:"bundle_id" usage:"Apple Sign In bundle ID."`
 }
 
-// NewSocialConfig creates a new SocialConfig struct.
 func NewSocialConfig() *SocialConfig {
 	return &SocialConfig{
 		Steam: &SocialConfigSteam{
@@ -823,7 +838,6 @@ func (r *RuntimeConfig) GetLuaReadOnlyGlobals() bool {
 	return r.LuaReadOnlyGlobals
 }
 
-// NewRuntimeConfig creates a new RuntimeConfig struct.
 func NewRuntimeConfig() *RuntimeConfig {
 	return &RuntimeConfig{
 		Environment:        make(map[string]string, 0),
@@ -857,7 +871,6 @@ type MatchConfig struct {
 	LabelUpdateIntervalMs int `yaml:"label_update_interval_ms" json:"label_update_interval_ms" usage:"Time in milliseconds between match label update batch processes. Default 1000."`
 }
 
-// NewMatchConfig creates a new MatchConfig struct.
 func NewMatchConfig() *MatchConfig {
 	return &MatchConfig{
 		InputQueueSize:        128,
@@ -876,7 +889,6 @@ type TrackerConfig struct {
 	EventQueueSize int `yaml:"event_queue_size" json:"event_queue_size" usage:"Size of the tracker presence event buffer. Increase if the server is expected to generate a large number of presence events in a short time. Default 1024."`
 }
 
-// NewTrackerConfig creates a new TrackerConfig struct.
 func NewTrackerConfig() *TrackerConfig {
 	return &TrackerConfig{
 		EventQueueSize: 1024,
@@ -897,7 +909,6 @@ type ConsoleConfig struct {
 	SigningKey          string `yaml:"signing_key" json:"signing_key" usage:"Key used to sign console session tokens."`
 }
 
-// NewConsoleConfig creates a new ConsoleConfig struct.
 func NewConsoleConfig() *ConsoleConfig {
 	return &ConsoleConfig{
 		Port:                7351,
@@ -919,7 +930,6 @@ type LeaderboardConfig struct {
 	CallbackQueueWorkers int      `yaml:"callback_queue_workers" json:"callback_queue_workers" usage:"Number of workers to use for concurrent processing of leaderboard and tournament callbacks. Default 8."`
 }
 
-// NewLeaderboardConfig creates a new LeaderboardConfig struct.
 func NewLeaderboardConfig() *LeaderboardConfig {
 	return &LeaderboardConfig{
 		BlacklistRankCache:   []string{},
@@ -929,10 +939,12 @@ func NewLeaderboardConfig() *LeaderboardConfig {
 }
 
 type MatchmakerConfig struct {
-	MaxTickets    int `yaml:"max_tickets" json:"max_tickets" usage:"Maximum number of concurrent matchmaking tickets allowed per session or party. Default 3."`
-	IntervalSec   int `yaml:"interval_sec" json:"interval_sec" usage:"How quickly the matchmaker attempts to form matches, in seconds. Default 15."`
-	MaxIntervals  int `yaml:"max_intervals" json:"max_intervals" usage:"How many intervals the matchmaker attempts to find matches at the max player count, before allowing min count. Default 2."`
-	BatchPoolSize int `yaml:"batch_pool_size" json:"batch_pool_size" usage:"Number of concurrent indexing batches that will be allocated."`
+	MaxTickets    int  `yaml:"max_tickets" json:"max_tickets" usage:"Maximum number of concurrent matchmaking tickets allowed per session or party. Default 3."`
+	IntervalSec   int  `yaml:"interval_sec" json:"interval_sec" usage:"How quickly the matchmaker attempts to form matches, in seconds. Default 15."`
+	MaxIntervals  int  `yaml:"max_intervals" json:"max_intervals" usage:"How many intervals the matchmaker attempts to find matches at the max player count, before allowing min count. Default 2."`
+	BatchPoolSize int  `yaml:"batch_pool_size" json:"batch_pool_size" usage:"Number of concurrent indexing batches that will be allocated."`
+	RevPrecision  bool `yaml:"rev_precision" json:"rev_precision" usage:"Reverse matching precision. Default true."`
+	RevThreshold  int  `yaml:"rev_threshold" json:"rev_threshold" usage:"Reverse matching threshold. Default 1."`
 }
 
 func NewMatchmakerConfig() *MatchmakerConfig {
@@ -941,6 +953,8 @@ func NewMatchmakerConfig() *MatchmakerConfig {
 		IntervalSec:   15,
 		MaxIntervals:  2,
 		BatchPoolSize: 32,
+		RevPrecision:  false,
+		RevThreshold:  1,
 	}
 }
 
@@ -959,12 +973,23 @@ func NewIAPConfig() *IAPConfig {
 }
 
 type IAPAppleConfig struct {
-	SharedPassword string `yaml:"shared_password" json:"shared_password" usage:"Your Apple Store App IAP shared password. Only necessary for validation of auto-renewable subscriptions."`
+	SharedPassword          string `yaml:"shared_password" json:"shared_password" usage:"Your Apple Store App IAP shared password. Only necessary for validation of auto-renewable subscriptions."`
+	NotificationsEndpointId string `yaml:"notifications_endpoint_id" json:"notifications_endpoint_id" usage:"The callback endpoint identifier for Apple Store subscription notifications."`
 }
 
 type IAPGoogleConfig struct {
-	ClientEmail string `yaml:"client_email" json:"client_email" usage:"Google Service Account client email."`
-	PrivateKey  string `yaml:"private_key" json:"private_key" usage:"Google Service Account private key."`
+	ClientEmail             string `yaml:"client_email" json:"client_email" usage:"Google Service Account client email."`
+	PrivateKey              string `yaml:"private_key" json:"private_key" usage:"Google Service Account private key."`
+	NotificationsEndpointId string `yaml:"notifications_endpoint_id" json:"notifications_endpoint_id" usage:"The callback endpoint identifier for Android subscription notifications."`
+	RefundCheckPeriodMin    int    `yaml:"refund_check_period_min" json:"refund_check_period_min" usage:"Defines the polling interval in minutes of the Google IAP refund API."`
+	PackageName             string `yaml:"package_name" json:"package_name" usage:"Google Play Store App Package Name."`
+}
+
+func (iapg *IAPGoogleConfig) Enabled() bool {
+	if iapg.PrivateKey != "" && iapg.PackageName != "" {
+		return true
+	}
+	return false
 }
 
 type IAPHuaweiConfig struct {
