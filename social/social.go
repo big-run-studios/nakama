@@ -649,8 +649,10 @@ func (c *Client) CheckAppleToken(ctx context.Context, bundleId string, idToken s
 	})
 
 	// Check if verification attempt has failed.
-	if token == nil || err != nil {
-		return nil, errors.New("apple id token invalid")
+	if err != nil {
+		return nil, fmt.Errorf("apple id token invalid: %s", err.Error())
+	} else if token == nil {
+		return nil, fmt.Errorf("apple id token invalid")
 	}
 
 	// Extract the claims we need now that we know the token is valid.
@@ -780,7 +782,12 @@ func (c *Client) CheckFacebookLimitedLoginToken(ctx context.Context, appId strin
 		claims := token.Claims.(jwt.MapClaims)
 
 		// Verify the issuer.
-		if !claims.VerifyIssuer("https://facebook.com", true) {
+		switch iss, _ := claims["iss"].(string); iss {
+		case "https://www.facebook.com":
+			fallthrough
+		case "https://facebook.com":
+			break
+		default:
 			return nil, fmt.Errorf("unexpected issuer: %v", claims["iss"])
 		}
 
@@ -866,7 +873,7 @@ func (c *Client) requestRaw(ctx context.Context, provider, path string, headers 
 	case 401:
 		return nil, fmt.Errorf("%v error url %v, status code %v, body %s", provider, path, resp.StatusCode, body)
 	default:
-		c.logger.Warn("error response code from social request", zap.String("provider", provider), zap.Int("code", resp.StatusCode))
+		c.logger.Warn("error response code from social request", zap.String("provider", provider), zap.Int("code", resp.StatusCode), zap.String("body", string(body)))
 		return nil, fmt.Errorf("%v error url %v, status code %v, body %s", provider, path, resp.StatusCode, body)
 	}
 }

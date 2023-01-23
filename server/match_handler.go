@@ -26,6 +26,8 @@ import (
 	"go.uber.org/zap"
 )
 
+var ErrMatchInitStateNil = errors.New("Match initial state must not be nil")
+
 type MatchDataMessage struct {
 	UserID      uuid.UUID
 	SessionID   uuid.UUID
@@ -131,11 +133,6 @@ func NewMatchHandler(logger *zap.Logger, config Config, sessionRegistry SessionR
 		core.Cleanup()
 		return nil, err
 	}
-	if state == nil {
-		core.Cancel()
-		core.Cleanup()
-		return nil, errors.New("Match initial state must not be nil")
-	}
 
 	// Construct the match.
 	mh := &MatchHandler{
@@ -219,7 +216,7 @@ func (mh *MatchHandler) disconnectClients() {
 
 // Stop the match handler and clean up all its resources.
 func (mh *MatchHandler) Stop() {
-	if !mh.stopped.CAS(false, true) {
+	if !mh.stopped.CompareAndSwap(false, true) {
 		return
 	}
 

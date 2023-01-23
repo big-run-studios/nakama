@@ -78,9 +78,6 @@ func (a *sparseArrayObject) setLengthInt(l uint32, throw bool) bool {
 }
 
 func (a *sparseArrayObject) setLength(v uint32, throw bool) bool {
-	if v == a.length {
-		return true
-	}
 	if !a.lengthProp.writable {
 		a.val.runtime.typeErrorResult(throw, "length is not writable")
 		return false
@@ -120,7 +117,7 @@ func (a *sparseArrayObject) getIdx(idx valueInt, receiver Value) Value {
 	return prop
 }
 
-func (a *sparseArrayObject) getLengthProp() Value {
+func (a *sparseArrayObject) getLengthProp() *valueProperty {
 	a.lengthProp.value = intToValue(int64(a.length))
 	return &a.lengthProp
 }
@@ -369,7 +366,7 @@ func (a *sparseArrayObject) defineOwnPropertyStr(name unistring.String, descr Pr
 		return a._defineIdxProperty(idx, descr, throw)
 	}
 	if name == "length" {
-		return a.val.runtime.defineArrayLength(&a.lengthProp, descr, a.setLength, throw)
+		return a.val.runtime.defineArrayLength(a.getLengthProp(), descr, a.setLength, throw)
 	}
 	return a.baseObject.defineOwnPropertyStr(name, descr, throw)
 }
@@ -412,9 +409,9 @@ func (a *sparseArrayObject) deleteIdx(idx valueInt, throw bool) bool {
 	return a.baseObject.deleteStr(idx.string(), throw)
 }
 
-func (a *sparseArrayObject) sortLen() int64 {
+func (a *sparseArrayObject) sortLen() int {
 	if len(a.items) > 0 {
-		return int64(a.items[len(a.items)-1].idx) + 1
+		return toIntStrict(int64(a.items[len(a.items)-1].idx) + 1)
 	}
 
 	return 0
@@ -463,12 +460,12 @@ func (a *sparseArrayObject) exportToArrayOrSlice(dst reflect.Value, typ reflect.
 	r := a.val.runtime
 	if iter := a.getSym(SymIterator, nil); iter == r.global.arrayValues || iter == nil {
 		l := toIntStrict(int64(a.length))
-		if dst.Len() != l {
-			if typ.Kind() == reflect.Array {
+		if typ.Kind() == reflect.Array {
+			if dst.Len() != l {
 				return fmt.Errorf("cannot convert an Array into an array, lengths mismatch (have %d, need %d)", l, dst.Len())
-			} else {
-				dst.Set(reflect.MakeSlice(typ, l, l))
 			}
+		} else {
+			dst.Set(reflect.MakeSlice(typ, l, l))
 		}
 		ctx.putTyped(a.val, typ, dst.Interface())
 		for _, item := range a.items {

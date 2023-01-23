@@ -61,7 +61,7 @@ func (s *ApiServer) JoinTournament(ctx context.Context, in *api.JoinTournamentRe
 
 	tournamentID := in.GetTournamentId()
 
-	if err := TournamentJoin(ctx, s.logger, s.db, s.leaderboardCache, userID.String(), username, tournamentID); err != nil {
+	if err := TournamentJoin(ctx, s.logger, s.db, s.leaderboardCache, s.leaderboardRankCache, userID, username, tournamentID); err != nil {
 		if err == runtime.ErrTournamentNotFound {
 			return nil, status.Error(codes.NotFound, "Tournament not found.")
 		} else if err == runtime.ErrTournamentMaxSizeReached {
@@ -214,12 +214,12 @@ func (s *ApiServer) ListTournaments(ctx context.Context, in *api.ListTournaments
 	}
 
 	// If startTime and endTime are both not set the API will only return active or future tournaments.
-	startTime := -1 // don't include start time in query
+	startTime := -1 // Don't include start time in query by default.
 	if in.GetStartTime() != nil {
 		startTime = int(in.GetStartTime().GetValue())
 	}
 
-	endTime := -1 // don't include end time in query
+	endTime := -1 // Don't include end time in query by default.
 	if in.GetEndTime() != nil {
 		endTime = int(in.GetEndTime().GetValue())
 		if endTime != 0 && endTime < startTime { // Allow 0 value to explicitly request tournaments with no end time set.
@@ -379,24 +379,22 @@ func (s *ApiServer) ListTournamentRecordsAroundOwner(ctx context.Context, in *ap
 		overrideExpiry = in.Expiry.Value
 	}
 
-	records, err := TournamentRecordsHaystack(ctx, s.logger, s.db, s.leaderboardCache, s.leaderboardRankCache, in.GetTournamentId(), ownerID, limit, overrideExpiry)
+	records, err := TournamentRecordsHaystack(ctx, s.logger, s.db, s.leaderboardCache, s.leaderboardRankCache, in.GetTournamentId(), in.Cursor, ownerID, limit, overrideExpiry)
 	if err == ErrLeaderboardNotFound {
 		return nil, status.Error(codes.NotFound, "Tournament not found.")
 	} else if err != nil {
 		return nil, status.Error(codes.Internal, "Error querying records from leaderboard.")
 	}
 
-	list := &api.TournamentRecordList{Records: records}
-
 	// After hook.
 	if fn := s.runtime.AfterListTournamentRecordsAroundOwner(); fn != nil {
 		afterFn := func(clientIP, clientPort string) error {
-			return fn(ctx, s.logger, ctx.Value(ctxUserIDKey{}).(uuid.UUID).String(), ctx.Value(ctxUsernameKey{}).(string), ctx.Value(ctxVarsKey{}).(map[string]string), ctx.Value(ctxExpiryKey{}).(int64), clientIP, clientPort, list, in)
+			return fn(ctx, s.logger, ctx.Value(ctxUserIDKey{}).(uuid.UUID).String(), ctx.Value(ctxUsernameKey{}).(string), ctx.Value(ctxVarsKey{}).(map[string]string), ctx.Value(ctxExpiryKey{}).(int64), clientIP, clientPort, records, in)
 		}
 
 		// Execute the after function lambda wrapped in a trace for stats measurement.
 		traceApiAfter(ctx, s.logger, s.metrics, ctx.Value(ctxFullMethodKey{}).(string), afterFn)
 	}
 
-	return list, nil
+	return records, nil
 }

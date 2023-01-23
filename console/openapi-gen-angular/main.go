@@ -70,8 +70,8 @@ const DEFAULT_HOST = 'http://127.0.0.1:7120';
 const DEFAULT_TIMEOUT_MS = 5000;
 
 export class ConfigParams {
-  host: string
-  timeoutMs: number
+  host!: string
+  timeoutMs!: number
 }
 
 @Injectable({providedIn: 'root'})
@@ -114,7 +114,7 @@ export class {{(index .Tags 0).Name}}Service {
 	{{- $body := false -}}
   {{- range $index, $parameter := $operation.Parameters}}
 		{{- if and (eq $index 0) (eq $hasSecurity true) -}}{{- ", " -}}{{- else if ne $index 0 -}}{{- ", " -}}{{- end -}}
-    {{- $parameter.Name | snakeToCamel }}{{- if not $parameter.Required }}?{{- end -}}{{": "}}
+    {{- $parameter.Name }}{{- if not $parameter.Required }}?{{- end -}}{{": "}}
           {{- if eq $parameter.In "path" -}}
     {{ $parameter.Type }}
           {{- else if eq $parameter.In "body" -}}
@@ -146,16 +146,15 @@ export class {{(index .Tags 0).Name}}Service {
       ): Observable<{{- if $operation.Responses.Ok.Schema.Ref -}} {{- $operation.Responses.Ok.Schema.Ref | cleanRef -}} {{- else -}} any {{- end}}> {
 
 		    {{- range $parameter := $operation.Parameters}}
-    {{- $snakeToCamel := $parameter.Name | snakeToCamel}}
       {{- if eq $parameter.In "path"}}
-		{{ $parameter.Name }} = encodeURIComponent(String({{- $snakeToCamel}}))
+		{{ $parameter.Name }} = encodeURIComponent(String({{- $parameter.Name}}))
       {{- end}}
         {{- end}}
 		const urlPath = {{ $url | convertPathToJs -}};
     let params = new HttpParams();
       {{- range $argument := $operation.Parameters -}}
 			  {{if eq $argument.In "query"}}
-    if ({{$argument.Name}}) {
+    if ({{$argument.Name}}{{if eq $argument.Type "boolean"}} || {{$argument.Name}} === false{{end}}) {
       {{if eq $argument.Type "array" -}}
       {{$argument.Name}}.forEach(e => params = params.append('{{$argument.Name}}', String(e)))
       {{- else -}}
@@ -219,22 +218,18 @@ func enumDescriptions(def Definition) (output []string) {
 	return def.Enum
 }
 
-func convertRefToClassName(input string) (className string) {
-	cleanRef := strings.TrimPrefix(input, "#/definitions/")
-	className = strings.Title(cleanRef)
-	return
-}
-
-func iscamelToSnake(input string) (output bool) {
-	output = true
-	for _, v := range input {
-		vString := string(v)
-		if vString != "_" && strings.ToUpper(vString) == vString {
-			output = false
+func convertRefToClassName(prefixesToRemove []string) func(string) string {
+	return func(input string) string {
+		cleanRef := strings.TrimPrefix(input, "#/definitions/")
+		for _, prefix := range prefixesToRemove {
+			if strings.HasPrefix(cleanRef, prefix) {
+				cleanRef = strings.TrimPrefix(cleanRef, prefix)
+				break
+			}
 		}
-	}
 
-	return
+		return strings.Title(cleanRef)
+	}
 }
 
 // camelToPascal converts a string from camel case to Pascal case.
@@ -249,20 +244,12 @@ func camelToPascal(camelCase string) (pascalCase string) {
 }
 
 func camelToSnake(input string) (output string) {
-	output = ""
-	if iscamelToSnake(input) {
-		output = input
-		return
-	}
-	for _, v := range input {
-		vString := string(v)
-		if vString == strings.ToUpper(vString) {
-			output += "_" + strings.ToLower(vString)
-		} else {
-			output += vString
-		}
-	}
-	return
+	var matchFirstCap = regexp.MustCompile("(.)([A-Z][a-z]+)")
+	var matchAllCap = regexp.MustCompile("([a-z0-9])([A-Z])")
+
+	snake := matchFirstCap.ReplaceAllString(input, "${1}_${2}")
+	snake = matchAllCap.ReplaceAllString(snake, "${1}_${2}")
+	return strings.ToLower(snake)
 }
 
 // pascalToCamel converts a Pascal case string to a camel case string.
@@ -293,11 +280,12 @@ func main() {
 
 	var schema = &Swagger{}
 
+	convertRefToClassNameFunc := convertRefToClassName(prefixesToRemove)
 	fmap := template.FuncMap{
 		"enumDescriptions": enumDescriptions,
 		"enumSummary":      enumSummary,
 		"snakeToCamel":     snakeToCamel,
-		"cleanRef":         convertRefToClassName,
+		"cleanRef":         convertRefToClassNameFunc,
 		"isRefToEnum": func(ref string) bool {
 			// swagger schema definition keys have inconsistent casing
 			var camelOk bool
@@ -321,14 +309,14 @@ func main() {
 
 			return len(enums) > 0
 		},
-		"title":                strings.Title,
-		"camelToSnake":         camelToSnake,
-		"uppercase":            strings.ToUpper,
-		"convertType": 					convertType,
-		"convertPathToJs":			convertPathToJs,
-		"inc": 									func(i int) int { return i + 1 },
-		"removeNewline":				func(s string) string { return strings.Replace(s, "\n", " / ", -1) },
-		"exists": 							func(s string) bool { return s != "" },
+		"title":           strings.Title,
+		"camelToSnake":    camelToSnake,
+		"uppercase":       strings.ToUpper,
+		"convertType":     convertType(prefixesToRemove, convertRefToClassNameFunc),
+		"convertPathToJs": convertPathToJs,
+		"inc":             func(i int) int { return i + 1 },
+		"removeNewline":   func(s string) string { return strings.Replace(s, "\n", " / ", -1) },
+		"exists":          func(s string) bool { return s != "" },
 	}
 
 	content, err := ioutil.ReadFile(*input)
@@ -342,7 +330,7 @@ func main() {
 		return
 	}
 
-	interfacesToRemove := []string{"googlerpcStatus", "protobufAny"}
+	interfacesToRemove := []string{"googlerpcStatus", "rpcStatus", "protobufAny"}
 	adjustSchemaData(schema, prefixesToRemove, interfacesToRemove)
 	createBodyTypes(schema)
 
@@ -373,44 +361,46 @@ func main() {
 	writer.Flush()
 }
 
-func convertType(prop Property) (tsType string) {
-	switch prop.Type {
-	case "string":
-		return "string"
-	case "integer":
-		fallthrough
-	case "number":
-		return "number"
-	case "boolean":
-		return "boolean"
-	case "array":
-		switch prop.Items.Type {
+func convertType(prefixesToRemove []string, convertRefToClassName func(string) string) func(Property) (tsType string) {
+	return func(prop Property) (tsType string) {
+		switch prop.Type {
 		case "string":
-			return "Array<string>"
+			return "string"
 		case "integer":
 			fallthrough
 		case "number":
-			return "Array<number>"
+			return "number"
 		case "boolean":
-			return "Array<boolean>"
+			return "boolean"
+		case "array":
+			switch prop.Items.Type {
+			case "string":
+				return "Array<string>"
+			case "integer":
+				fallthrough
+			case "number":
+				return "Array<number>"
+			case "boolean":
+				return "Array<boolean>"
+			default:
+				return "Array<" + convertRefToClassName(prop.Items.Ref) + ">"
+			}
+		case "object":
+			switch prop.AdditionalProperties.Type {
+			case "string":
+				return "Map<string, string>"
+			case "integer":
+				fallthrough
+			case "number":
+				return "Map<string, number>"
+			case "boolean":
+				return "Map<string, boolean>"
+			default:
+				return "Map<string, " + convertRefToClassName(prop.AdditionalProperties.Ref) + ">"
+			}
 		default:
-			return "Array<"+convertRefToClassName(prop.Items.Ref)+">"
+			return convertRefToClassName(prop.Ref)
 		}
-	case "object":
-		switch prop.AdditionalProperties.Type {
-		case "string":
-			return "Map<string, string>"
-		case "integer":
-			fallthrough
-		case "number":
-			return "Map<string, number>"
-		case "boolean":
-			return "Map<string, boolean>"
-		default:
-			return "Map<string, "+ convertRefToClassName(prop.AdditionalProperties.Type) +">"
-		}
-	default:
-		return convertRefToClassName(prop.Ref)
 	}
 }
 
@@ -441,7 +431,7 @@ func createBodyTypes(schema *Swagger) {
 						Properties: param.Schema.Properties,
 					}
 					//replace it with new reference
-					param.Schema = Schema {
+					param.Schema = Schema{
 						Ref: newType,
 					}
 				}
@@ -450,12 +440,12 @@ func createBodyTypes(schema *Swagger) {
 	}
 }
 
-func adjustSchemaData(schema *Swagger,  prefixesToRemove []string, interfacesToRemove []string) {
+func adjustSchemaData(schema *Swagger, prefixesToRemove []string, interfacesToRemove []string) {
 	adjustProps := func(props map[string]*Property) {
 		for _, prop := range props {
 			// check field array ref type
 			for _, prefix := range prefixesToRemove {
-				p := "#/definitions/"+prefix
+				p := "#/definitions/" + prefix
 				if strings.HasPrefix(prop.Items.Ref, p) {
 					prop.Items.Ref = strings.TrimPrefix(prop.Items.Ref, p)
 					break
@@ -463,7 +453,7 @@ func adjustSchemaData(schema *Swagger,  prefixesToRemove []string, interfacesToR
 			}
 			// check field ref type
 			for _, prefix := range prefixesToRemove {
-				p := "#/definitions/"+prefix
+				p := "#/definitions/" + prefix
 				if strings.HasPrefix(prop.Ref, p) {
 					prop.Ref = strings.TrimPrefix(prop.Ref, p)
 					break
@@ -500,14 +490,14 @@ func adjustSchemaData(schema *Swagger,  prefixesToRemove []string, interfacesToR
 			}
 			// check function return types
 			for _, prefix := range prefixesToRemove {
-				p := "#/definitions/"+prefix
+				p := "#/definitions/" + prefix
 				if strings.HasPrefix(operation.Responses.Ok.Schema.Ref, p) {
 					operation.Responses.Ok.Schema.Ref = strings.TrimPrefix(operation.Responses.Ok.Schema.Ref, p)
 					break
 				}
 			}
 			for _, prefix := range prefixesToRemove {
-				p := "#/definitions/"+prefix
+				p := "#/definitions/" + prefix
 				for _, param := range operation.Parameters {
 					// check properties on body
 					adjustProps(param.Schema.Properties)

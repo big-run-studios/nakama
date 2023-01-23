@@ -18,7 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -61,14 +61,14 @@ return test`
 )
 
 func runtimeWithModules(t *testing.T, modules map[string]string) (*Runtime, *RuntimeInfo, error) {
-	dir, err := ioutil.TempDir("", fmt.Sprintf("nakama_runtime_lua_test_%v", uuid.Must(uuid.NewV4()).String()))
+	dir, err := os.MkdirTemp("", fmt.Sprintf("nakama_runtime_lua_test_%v", uuid.Must(uuid.NewV4()).String()))
 	if err != nil {
 		t.Fatalf("Failed initializing runtime modules tempdir: %s", err.Error())
 	}
 	defer os.RemoveAll(dir)
 
 	for moduleName, moduleData := range modules {
-		if err := ioutil.WriteFile(filepath.Join(dir, fmt.Sprintf("%v.lua", moduleName)), []byte(moduleData), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("%v.lua", moduleName)), []byte(moduleData), 0644); err != nil {
 			t.Fatalf("Failed initializing runtime modules tempfile: %s", err.Error())
 		}
 	}
@@ -76,7 +76,7 @@ func runtimeWithModules(t *testing.T, modules map[string]string) (*Runtime, *Run
 	cfg := NewConfig(logger)
 	cfg.Runtime.Path = dir
 
-	return NewRuntime(context.Background(), logger, logger, NewDB(t), protojsonMarshaler, protojsonUnmarshaler, cfg, nil, nil, nil, nil, nil, nil, nil, nil, metrics, nil, &DummyMessageRouter{})
+	return NewRuntime(context.Background(), logger, logger, NewDB(t), protojsonMarshaler, protojsonUnmarshaler, cfg, "", nil, nil, nil, nil, nil, nil, nil, nil, nil, metrics, nil, &DummyMessageRouter{})
 }
 
 func TestRuntimeSampleScript(t *testing.T) {
@@ -354,7 +354,7 @@ nakama.register_rpc(test.printWorld, "helloworld")`,
 
 	db := NewDB(t)
 	pipeline := NewPipeline(logger, cfg, db, protojsonMarshaler, protojsonUnmarshaler, nil, nil, nil, nil, nil, nil, nil, runtime)
-	apiServer := StartApiServer(logger, logger, db, protojsonMarshaler, protojsonUnmarshaler, cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, metrics, pipeline, runtime)
+	apiServer := StartApiServer(logger, logger, db, protojsonMarshaler, protojsonUnmarshaler, cfg, "", nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, metrics, pipeline, runtime)
 	defer apiServer.Stop()
 
 	payload := "\"Hello World\""
@@ -366,7 +366,7 @@ nakama.register_rpc(test.printWorld, "helloworld")`,
 		t.Fatal(err)
 	}
 
-	b, err := ioutil.ReadAll(res.Body)
+	b, err := io.ReadAll(res.Body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +381,7 @@ func TestRuntimeHTTPRequest(t *testing.T) {
 		"test": `
 local nakama = require("nakama")
 function test(ctx, payload)
-	local success, code, headers, body = pcall(nakama.http_request, "http://httpbin.org/status/200", "GET", {})
+	local success, code, headers, body = pcall(nakama.http_request, "https://httpbin.org/status/200", "GET", {})
 	return tostring(code)
 end
 nakama.register_rpc(test, "test")`,
@@ -658,6 +658,26 @@ local user_id = "4c2ae592-b2a7-445e-98ec-697694478b1c" -- who to send
 local code = 1
 
 nk.notification_send(user_id, subject, content, code, "", false)`,
+	}
+
+	_, _, err := runtimeWithModules(t, modules)
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+}
+
+func TestRuntimeNotificationsDelete(t *testing.T) {
+	modules := map[string]string{
+		"test": `
+local nk = require("nakama")
+
+local user_id = "4c2ae592-b2a7-445e-98ec-697694478b1c"
+local notification_id = "3707b43c-60f0-4ba7-a94b-e21a028aeffb"
+
+local notifications = {
+  { user_id = user_id, notification_id = notification_id }
+}
+nk.notifications_delete(notifications)`,
 	}
 
 	_, _, err := runtimeWithModules(t, modules)

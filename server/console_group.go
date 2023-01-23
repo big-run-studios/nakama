@@ -1,3 +1,17 @@
+// Copyright 2022 The Nakama Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package server
 
 import (
@@ -7,6 +21,10 @@ import (
 	"encoding/base64"
 	"encoding/gob"
 	"errors"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/gofrs/uuid"
 	"github.com/heroiclabs/nakama-common/api"
 	"github.com/heroiclabs/nakama-common/rtapi"
@@ -18,9 +36,6 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
-	"strconv"
-	"strings"
-	"time"
 )
 
 type consoleGroupCursor struct {
@@ -113,7 +128,7 @@ FROM groups ORDER BY id ASC LIMIT $1`
 	var previousGroup *api.Group
 
 	for rows.Next() {
-		group, err := convertToGroup(rows)
+		group, _, err := convertToGroup(rows)
 		if err != nil {
 			_ = rows.Close()
 			s.logger.Error("Error scanning groups.", zap.Any("in", in), zap.Error(err))
@@ -197,7 +212,7 @@ func (s *ConsoleServer) ExportGroup(ctx context.Context, in *console.GroupId) (*
 		return nil, status.Error(codes.Internal, "An error occurred while trying to export group data.")
 	}
 
-	users, err := ListGroupUsers(ctx, s.logger, s.db, s.tracker, groupID, 0, nil, "")
+	users, err := ListGroupUsers(ctx, s.logger, s.db, s.statusRegistry, groupID, 0, nil, "")
 	if err != nil {
 		return nil, status.Error(codes.Internal, "An error occurred while trying to export group members.")
 	}
@@ -214,7 +229,12 @@ func (s *ConsoleServer) UpdateGroup(ctx context.Context, in *console.UpdateGroup
 		return nil, status.Error(codes.InvalidArgument, "Requires a valid group ID.")
 	}
 
-	err = UpdateGroup(ctx, s.logger, s.db, groupID, uuid.Nil, uuid.Nil, in.Name, in.LangTag, in.Description, in.AvatarUrl, in.Metadata, in.Open, int(in.MaxCount.Value))
+	var maxCount int
+	if in.MaxCount != nil {
+		maxCount = int(in.MaxCount.Value)
+	}
+
+	err = UpdateGroup(ctx, s.logger, s.db, groupID, uuid.Nil, uuid.Nil, in.Name, in.LangTag, in.Description, in.AvatarUrl, in.Metadata, in.Open, maxCount)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +248,7 @@ func (s *ConsoleServer) GetMembers(ctx context.Context, in *console.GroupId) (*a
 		return nil, status.Error(codes.InvalidArgument, "Requires a valid group ID.")
 	}
 
-	users, err := ListGroupUsers(ctx, s.logger, s.db, s.tracker, groupID, 0, nil, "")
+	users, err := ListGroupUsers(ctx, s.logger, s.db, s.statusRegistry, groupID, 0, nil, "")
 	if err != nil {
 		return nil, status.Error(codes.Internal, "An error occurred while trying to list group members.")
 	}
@@ -279,12 +299,6 @@ func (s *ConsoleServer) DemoteGroupMember(ctx context.Context, in *console.Updat
 			return runtime.ErrGroupNotFound
 		}
 
-		tx, err := db.BeginTx(ctx, nil)
-		if err != nil {
-			logger.Error("Could not begin database transaction.", zap.Error(err))
-			return err
-		}
-
 		// Prepare the messages we'll need to send to the group channel.
 		stream := PresenceStream{
 			Mode:    StreamModeGroup,
@@ -302,6 +316,13 @@ func (s *ConsoleServer) DemoteGroupMember(ctx context.Context, in *console.Updat
 
 		var message *api.ChannelMessage
 		ts := time.Now().Unix()
+
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			logger.Error("Could not begin database transaction.", zap.Error(err))
+			return err
+		}
+
 		if err := ExecuteInTx(ctx, tx, func() error {
 			query := ""
 			if myState == 0 {
@@ -428,12 +449,6 @@ func (s *ConsoleServer) PromoteGroupMember(ctx context.Context, in *console.Upda
 			return runtime.ErrGroupNotFound
 		}
 
-		tx, err := db.BeginTx(ctx, nil)
-		if err != nil {
-			logger.Error("Could not begin database transaction.", zap.Error(err))
-			return err
-		}
-
 		// Prepare the messages we'll need to send to the group channel.
 		stream := PresenceStream{
 			Mode:    StreamModeGroup,
@@ -447,6 +462,13 @@ func (s *ConsoleServer) PromoteGroupMember(ctx context.Context, in *console.Upda
 
 		var message *api.ChannelMessage
 		ts := time.Now().Unix()
+
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			logger.Error("Could not begin database transaction.", zap.Error(err))
+			return err
+		}
+
 		if err := ExecuteInTx(ctx, tx, func() error {
 			if uid == caller {
 				return errors.New("cannot promote self")
@@ -524,5 +546,45 @@ VALUES ($1, $2, $3, $4, $5, $6::UUID, $7::UUID, $8, $9, $10, $10)`
 		return nil, status.Error(codes.Internal, "An error occurred while trying to promote the user in the group.")
 	}
 
+	return &emptypb.Empty{}, nil
+}
+
+func (s *ConsoleServer) AddGroupUsers(ctx context.Context, in *console.AddGroupUsersRequest) (*emptypb.Empty, error) {
+	groupUid, err := uuid.FromString(in.GroupId)
+	if err != nil {
+		return nil, status.Error(codes.NotFound, "Invalid group ID format.")
+	}
+	ids := strings.Split(in.Ids, ",")
+	uuids := make([]uuid.UUID, 0, len(ids))
+	for _, id := range ids {
+		id := strings.TrimSpace(id)
+		uid, err := uuid.FromString(id)
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, "Invalid user ID format: "+id)
+		}
+		uuids = append(uuids, uid)
+	}
+
+	if in.JoinRequest {
+		for _, uid := range uuids {
+			// Look up the username, and implicitly if this user exists.
+			var username sql.NullString
+			query := "SELECT username FROM users WHERE id = $1::UUID"
+			if err = s.db.QueryRowContext(ctx, query, uid).Scan(&username); err != nil {
+				if err == sql.ErrNoRows {
+					return nil, status.Error(codes.InvalidArgument, "User not found: "+uid.String()+". Refresh the page to see any updates.")
+				}
+				s.logger.Debug("Could not retrieve username to join user to group.", zap.Error(err), zap.String("user_id", uid.String()))
+				return nil, status.Error(codes.Internal, "An error occurred while trying to join the user to the group. Refresh the page to see any updates.")
+			}
+			if err = JoinGroup(ctx, s.logger, s.db, s.router, groupUid, uid, username.String); err != nil {
+				return nil, status.Error(codes.Internal, "An error occurred while trying to join an user to the group, refresh the page: "+err.Error()+". Refresh the page to see any updates.")
+			}
+		}
+	} else {
+		if err = AddGroupUsers(ctx, s.logger, s.db, s.router, uuid.Nil, groupUid, uuids); err != nil {
+			return nil, status.Error(codes.Internal, "An error occurred while trying to add the users: "+err.Error())
+		}
+	}
 	return &emptypb.Empty{}, nil
 }

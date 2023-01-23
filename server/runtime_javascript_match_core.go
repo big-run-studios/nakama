@@ -15,6 +15,7 @@
 package server
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -64,10 +65,10 @@ type RuntimeJavaScriptMatchCore struct {
 	loggerModule  goja.Value
 	program       *goja.Program
 
-	// ctxCancelFn context.CancelFunc
+	ctxCancelFn context.CancelFunc
 }
 
-func NewRuntimeJavascriptMatchCore(logger *zap.Logger, module string, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config Config, socialClient *social.Client, leaderboardCache LeaderboardCache, rankCache LeaderboardRankCache, localCache *RuntimeJavascriptLocalCache, leaderboardScheduler LeaderboardScheduler, sessionRegistry SessionRegistry, sessionCache SessionCache, matchRegistry MatchRegistry, tracker Tracker, streamManager StreamManager, router MessageRouter, matchCreateFn RuntimeMatchCreateFunction, eventFn RuntimeEventCustomFunction, id uuid.UUID, node string, stopped *atomic.Bool, matchHandlers *jsMatchHandlers, modCache *RuntimeJSModuleCache) (RuntimeMatchCore, error) {
+func NewRuntimeJavascriptMatchCore(logger *zap.Logger, module string, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config Config, socialClient *social.Client, leaderboardCache LeaderboardCache, rankCache LeaderboardRankCache, localCache *RuntimeJavascriptLocalCache, leaderboardScheduler LeaderboardScheduler, sessionRegistry SessionRegistry, sessionCache SessionCache, statusRegistry *StatusRegistry, matchRegistry MatchRegistry, tracker Tracker, metrics Metrics, streamManager StreamManager, router MessageRouter, matchCreateFn RuntimeMatchCreateFunction, eventFn RuntimeEventCustomFunction, id uuid.UUID, node, version string, stopped *atomic.Bool, matchHandlers *jsMatchHandlers, modCache *RuntimeJSModuleCache) (RuntimeMatchCore, error) {
 	runtime := goja.New()
 
 	jsLoggerInst, err := NewJsLogger(runtime, logger)
@@ -75,17 +76,19 @@ func NewRuntimeJavascriptMatchCore(logger *zap.Logger, module string, db *sql.DB
 		logger.Fatal("Failed to initialize JavaScript runtime", zap.Error(err))
 	}
 
-	nakamaModule := NewRuntimeJavascriptNakamaModule(logger, db, protojsonMarshaler, protojsonUnmarshaler, config, socialClient, leaderboardCache, rankCache, localCache, leaderboardScheduler, sessionRegistry, sessionCache, matchRegistry, tracker, streamManager, router, eventFn, matchCreateFn)
+	nakamaModule := NewRuntimeJavascriptNakamaModule(logger, db, protojsonMarshaler, protojsonUnmarshaler, config, socialClient, leaderboardCache, rankCache, localCache, leaderboardScheduler, sessionRegistry, sessionCache, statusRegistry, matchRegistry, tracker, metrics, streamManager, router, eventFn, matchCreateFn)
 	nk := runtime.ToValue(nakamaModule.Constructor(runtime))
 	nkInst, err := runtime.New(nk)
 	if err != nil {
 		logger.Fatal("Failed to initialize JavaScript runtime", zap.Error(err))
 	}
+	goCtx, ctxCancelFn := context.WithCancel(context.Background())
+	nakamaModule.ctx = goCtx
 
 	runtime.RunProgram(modCache.Modules[modCache.Names[0]].Program)
 	freezeGlobalObject(config, runtime)
 
-	ctx := NewRuntimeJsInitContext(runtime, node, config.GetRuntime().Environment)
+	ctx := NewRuntimeJsInitContext(runtime, node, version, config.GetRuntime().Environment)
 	ctx.Set(__RUNTIME_JAVASCRIPT_CTX_MODE, RuntimeExecutionModeMatch)
 	ctx.Set(__RUNTIME_JAVASCRIPT_CTX_MATCH_ID, fmt.Sprintf("%v.%v", id.String(), node))
 	ctx.Set(__RUNTIME_JAVASCRIPT_CTX_MATCH_NODE, node)
@@ -96,30 +99,37 @@ func NewRuntimeJavascriptMatchCore(logger *zap.Logger, module string, db *sql.DB
 
 	initFn, ok := goja.AssertFunction(runtime.Get(matchHandlers.initFn))
 	if !ok {
+		ctxCancelFn()
 		logger.Fatal("Failed to get JavaScript match loop function reference.", zap.String("fn", string(MatchInit)), zap.String("key", matchHandlers.initFn))
 	}
 	joinAttemptFn, ok := goja.AssertFunction(runtime.Get(matchHandlers.joinAttemptFn))
 	if !ok {
+		ctxCancelFn()
 		logger.Fatal("Failed to get JavaScript match loop function reference.", zap.String("fn", string(MatchJoinAttempt)), zap.String("key", matchHandlers.joinAttemptFn))
 	}
 	joinFn, ok := goja.AssertFunction(runtime.Get(matchHandlers.joinFn))
 	if !ok {
+		ctxCancelFn()
 		logger.Fatal("Failed to get JavaScript match loop function reference.", zap.String("fn", string(MatchJoin)), zap.String("key", matchHandlers.joinFn))
 	}
 	leaveFn, ok := goja.AssertFunction(runtime.Get(matchHandlers.leaveFn))
 	if !ok {
+		ctxCancelFn()
 		logger.Fatal("Failed to get JavaScript match loop function reference.", zap.String("fn", string(MatchLeave)), zap.String("key", matchHandlers.leaveFn))
 	}
 	loopFn, ok := goja.AssertFunction(runtime.Get(matchHandlers.loopFn))
 	if !ok {
+		ctxCancelFn()
 		logger.Fatal("Failed to get JavaScript match loop function reference.", zap.String("fn", string(MatchLoop)), zap.String("key", matchHandlers.loopFn))
 	}
 	terminateFn, ok := goja.AssertFunction(runtime.Get(matchHandlers.terminateFn))
 	if !ok {
+		ctxCancelFn()
 		logger.Fatal("Failed to get JavaScript match loop function reference.", zap.String("fn", string(MatchTerminate)), zap.String("key", matchHandlers.terminateFn))
 	}
 	signalFn, ok := goja.AssertFunction(runtime.Get(matchHandlers.signalFn))
 	if !ok {
+		ctxCancelFn()
 		logger.Fatal("Failed to get JavaScript match loop function reference.", zap.String("fn", string(MatchSignal)), zap.String("key", matchHandlers.signalFn))
 	}
 
@@ -156,7 +166,7 @@ func NewRuntimeJavascriptMatchCore(logger *zap.Logger, module string, db *sql.DB
 
 		loggerModule: jsLoggerInst,
 		nakamaModule: nkInst,
-		// ctxCancelFn: ctxCancelFn,
+		ctxCancelFn:  ctxCancelFn,
 	}
 
 	dispatcher := runtime.ToValue(
@@ -174,6 +184,7 @@ func NewRuntimeJavascriptMatchCore(logger *zap.Logger, module string, db *sql.DB
 
 	dispatcherInst, err := runtime.New(dispatcher)
 	if err != nil {
+		ctxCancelFn()
 		logger.Fatal("Failed to initialize JavaScript runtime", zap.Error(err))
 	}
 	core.dispatcher = dispatcherInst
@@ -218,6 +229,9 @@ func (rm *RuntimeJavaScriptMatchCore) MatchInit(presenceList *MatchPresenceList,
 	state, ok := retMap["state"]
 	if !ok {
 		return nil, 0, errors.New("matchInit is expected to return an object with a 'state' property")
+	}
+	if state == nil {
+		return nil, 0, ErrMatchInitStateNil
 	}
 
 	if err := rm.matchRegistry.UpdateMatchLabel(rm.id, rm.tickRate, rm.module, label, rm.createTime); err != nil {
@@ -513,7 +527,7 @@ func (rm *RuntimeJavaScriptMatchCore) CreateTime() int64 {
 }
 
 func (rm *RuntimeJavaScriptMatchCore) Cancel() {
-	// TODO: implement cancel
+	rm.ctxCancelFn()
 }
 
 func (rm *RuntimeJavaScriptMatchCore) Cleanup() {}
@@ -567,7 +581,7 @@ func (rm *RuntimeJavaScriptMatchCore) validateBroadcast(r *goja.Runtime, f goja.
 		case goja.ArrayBuffer:
 			dataBytes = dataExport.(goja.ArrayBuffer).Bytes()
 		default:
-			panic(r.NewTypeError("expects data to be an Uint8Array, a string or nil"))
+			panic(r.NewTypeError("expects data to be an ArrayBuffer, a string or nil"))
 		}
 	}
 
@@ -678,7 +692,7 @@ func (rm *RuntimeJavaScriptMatchCore) validateBroadcast(r *goja.Runtime, f goja.
 				return nil, nil, false
 			}
 		} else {
-			presenceIDs := rm.presenceList.FilterPresenceIDs(presenceIDs)
+			presenceIDs = rm.presenceList.FilterPresenceIDs(presenceIDs)
 			if len(presenceIDs) == 0 {
 				// None of the target presenceIDs existed in the list of match members.
 				return nil, nil, false

@@ -86,10 +86,26 @@ service Console {
     };
   }
 
+  // Log out a session and invalidate the session token.
+  rpc AuthenticateLogout (AuthenticateLogoutRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      post: "/v2/console/authenticate/logout",
+      body: "*"
+    };
+  }
+
   // Add a new console user.
   rpc AddUser (AddUserRequest) returns (google.protobuf.Empty) {
     option (google.api.http) = {
       post: "/v2/console/user",
+      body: "*"
+    };
+  }
+
+  // Add/join members to a group.
+  rpc AddGroupUsers (AddGroupUsersRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      post: "/v2/console/group/{group_id}/add",
       body: "*"
     };
   }
@@ -117,12 +133,17 @@ service Console {
 
   // Deletes all data
   rpc DeleteAllData (google.protobuf.Empty) returns (google.protobuf.Empty) {
-    option (google.api.http).delete = "/v2/console";
+    option (google.api.http).delete = "/v2/console/all";
   }
 
   // Delete all information stored for a user account.
   rpc DeleteAccount (AccountDeleteRequest) returns (google.protobuf.Empty) {
     option (google.api.http).delete = "/v2/console/account/{id}";
+  }
+
+  // Delete messages.
+  rpc DeleteChannelMessages (DeleteChannelMessagesRequest) returns (DeleteChannelMessagesResponse) {
+    option (google.api.http).delete = "/v2/console/message";
   }
 
   // Delete the friend relationship between two users.
@@ -285,19 +306,29 @@ service Console {
     option (google.api.http).get = "/v2/console/account";
   }
 
+  // List channel messages with the selected filter
+  rpc ListChannelMessages (ListChannelMessagesRequest) returns (api.ChannelMessageList) {
+    option (google.api.http).get = "/v2/console/channel";
+  }
+
   // List (and optionally filter) groups.
   rpc ListGroups (ListGroupsRequest) returns (GroupList) {
     option (google.api.http).get = "/v2/console/group";
   }
 
   // List ongoing matches
-  rpc ListMatches (nakama.api.ListMatchesRequest) returns (api.MatchList) {
+  rpc ListMatches (ListMatchesRequest) returns (MatchList) {
     option (google.api.http).get = "/v2/console/match";
   }
 
   // List validated purchases
   rpc ListPurchases (ListPurchasesRequest) returns (api.PurchaseList) {
     option (google.api.http).get = "/v2/console/purchase";
+  }
+
+  // List validated subscriptions
+  rpc ListSubscriptions (ListSubscriptionsRequest) returns (api.SubscriptionList) {
+    option (google.api.http).get = "/v2/console/subscription";
   }
 
   // List (and optionally filter) users.
@@ -470,6 +501,17 @@ message GroupExport {
   repeated nakama.api.GroupUserList.GroupUser members = 2;
 }
 
+// A list of realtime matches, with their node names.
+message MatchList {
+  message Match {
+    // The API match
+    api.Match api_match = 1;
+    // The node name
+    string node = 2;
+  }
+  repeated Match matches = 1;
+}
+
 
 // Add a new console user
 message AddUserRequest {
@@ -485,6 +527,16 @@ message AddUserRequest {
   bool newsletter_subscription = 5;
 }
 
+// Add/join users to a group.
+message AddGroupUsersRequest {
+  // Users to add/join.
+  string ids = 1;
+  // ID of the group to add them to.
+  string group_id = 2;
+  // Whether it is a join request.
+  bool join_request = 3;
+}
+
 // API Explorer List of Endpoints
 message ApiEndpointList {
   repeated ApiEndpointDescriptor endpoints = 1;
@@ -497,6 +549,12 @@ message AuthenticateRequest {
   string username = 1;
   // The password of the user.
   string password = 2;
+}
+
+// Log out a session and invalidate a session token.
+message AuthenticateLogoutRequest {
+  // Session token to log out.
+  string token = 1;
 }
 
 // API Explorer request definition for CallApiEndpoint
@@ -534,6 +592,14 @@ message Config {
 message ConsoleSession {
   // A session token (JWT) for the console user.
   string token = 1;
+}
+
+// Delete channel messages by timestamp or/and ids.
+message DeleteChannelMessagesRequest {
+  // Timestamp before which messages will be deleted.
+  google.protobuf.Timestamp before = 1;
+  // IDs of the messages to delete.
+  repeated string ids = 2;
 }
 
 // Delete friend relationship between two users.
@@ -660,6 +726,27 @@ message ListAccountsRequest {
   string cursor = 3;
 }
 
+// List selected channel messages.
+message ListChannelMessagesRequest {
+  enum Type {
+    UNKNOWN = 0;
+    ROOM = 2;
+    GROUP = 3;
+    DIRECT = 4;
+  }
+  // Type of the chat channel
+  Type type = 1;
+  // Label of the channel, if a standard chat room
+  string label = 2;
+  // Group ID of the channel, if a group chat
+  string group_id = 3;
+  // User IDs, if a direct chat
+  string user_id_one = 4;
+  string user_id_two = 5;
+  // Cursor to start from
+  string cursor = 6;
+}
+
 // List (and optionally filter) groups.
 message ListGroupsRequest {
   // User ID or username filter.
@@ -668,9 +755,39 @@ message ListGroupsRequest {
   string cursor = 2;
 }
 
+// List realtime matches.
+message ListMatchesRequest {
+  // Limit the number of returned matches.
+  google.protobuf.Int32Value limit = 1;
+  // Authoritative or relayed matches, or null for both.
+  google.protobuf.BoolValue authoritative = 2;
+  // Label filter.
+  google.protobuf.StringValue label = 3;
+  // Minimum user count.
+  google.protobuf.Int32Value min_size = 4;
+  // Maximum user count.
+  google.protobuf.Int32Value max_size = 5;
+  // Match ID.
+  string match_id = 6;
+  // Arbitrary label query.
+  google.protobuf.StringValue query = 7;
+  // Node name filter, optional.
+  google.protobuf.StringValue node = 8;
+}
+
 // List validated purchases.
 message ListPurchasesRequest {
   // User ID to filter purchases for
+  string user_id = 1;
+  // Max number of results per page
+  uint32 limit = 2;
+  // Cursor to retrieve a page of records from
+  string cursor = 3;
+}
+
+// List subscriptions.
+message ListSubscriptionsRequest {
+  // UserID to filter subscriptions for
   string user_id = 1;
   // Max number of results per page
   uint32 limit = 2;
@@ -704,6 +821,11 @@ message MatchState {
 message MatchStateRequest {
   // Match ID
   string id = 1;
+}
+
+message DeleteChannelMessagesResponse {
+  // Total number of messages deleted.
+  int64 total = 1;
 }
 
 // List of storage objects.

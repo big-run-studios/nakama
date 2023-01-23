@@ -58,9 +58,9 @@ type RuntimeGoMatchCore struct {
 	ctxCancelFn context.CancelFunc
 }
 
-func NewRuntimeGoMatchCore(logger *zap.Logger, module string, matchRegistry MatchRegistry, router MessageRouter, id uuid.UUID, node string, stopped *atomic.Bool, db *sql.DB, env map[string]string, nk runtime.NakamaModule, match runtime.Match) (RuntimeMatchCore, error) {
+func NewRuntimeGoMatchCore(logger *zap.Logger, module string, matchRegistry MatchRegistry, router MessageRouter, id uuid.UUID, node, version string, stopped *atomic.Bool, db *sql.DB, env map[string]string, nk runtime.NakamaModule, match runtime.Match) (RuntimeMatchCore, error) {
 	ctx, ctxCancelFn := context.WithCancel(context.Background())
-	ctx = NewRuntimeGoContext(ctx, node, env, RuntimeExecutionModeMatch, nil, nil, 0, "", "", nil, "", "", "", "")
+	ctx = NewRuntimeGoContext(ctx, node, version, env, RuntimeExecutionModeMatch, nil, nil, 0, "", "", nil, "", "", "", "")
 	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_MATCH_ID, fmt.Sprintf("%v.%v", id.String(), node))
 	ctx = context.WithValue(ctx, runtime.RUNTIME_CTX_MATCH_NODE, node)
 
@@ -107,6 +107,9 @@ func (r *RuntimeGoMatchCore) MatchInit(presenceList *MatchPresenceList, deferMes
 		return nil, 0, errors.New("MatchInit returned invalid tick rate, must be between 1 and 60")
 	}
 	r.tickRate = tickRate
+	if state == nil {
+		return nil, 0, ErrMatchInitStateNil
+	}
 
 	if err := r.matchRegistry.UpdateMatchLabel(r.id, r.tickRate, r.module, label, r.createTime); err != nil {
 		return nil, 0, err
