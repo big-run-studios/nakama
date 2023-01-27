@@ -1,17 +1,3 @@
-// Copyright 2021 The Nakama Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package server
 
 import (
@@ -55,13 +41,13 @@ func NewRedisSessionCache(logger *zap.Logger, config Config) SessionCache {
 	var isRedisWorking bool
 	redisClient := redis.NewClient(rbdOptions)
 	if redisClient == nil {
-		logger.Info("Redis client not properly connected. Using local cache")
+		logger.Info("SessionCache: Redis client not properly connected. Using local cache")
 		isRedisWorking = false
 	} else if _, err := redisClient.Ping(context.Background()).Result(); err != nil {
-		logger.Info("Redis client not properly connected. Using local cache", zap.Error(err))
+		logger.Info("SessionCache: Redis client not properly connected. Using local cache", zap.Error(err))
 		isRedisWorking = false
 	} else {
-		logger.Info("Redis connection established.")
+		logger.Info("SessionCache: Redis connection established.")
 		isRedisWorking = true
 	}
 
@@ -136,7 +122,7 @@ func (s *RedisSessionCache) Add(userID uuid.UUID, sessionExp int64, sessionToken
 
 	data, err := json.Marshal(cachedUser)
 	if err != nil {
-		s.logger.Error("Error marshalling cachedUser. User won't be added to cache", zap.Error(err), zap.String("userId", userID.String()))
+		s.logger.Error("SessionCache: Error marshalling cachedUser. User won't be added to cache", zap.Error(err), zap.String("userId", userID.String()))
 		return
 	}
 
@@ -148,23 +134,23 @@ func (s *RedisSessionCache) Add(userID uuid.UUID, sessionExp int64, sessionToken
 	deletionTime := time.Unix(maxTime, 0)
 	key := getUserKey(userID)
 	if err = s.client.Set(context.Background(), key, data, deletionTime.Sub(time.Now().UTC())).Err(); err != nil {
-		s.logger.Error("Error adding user to cache.", zap.Error(err), zap.String("userId", userID.String()))
+		s.logger.Error("SessionCache: Error adding user to cache.", zap.Error(err), zap.String("userId", userID.String()))
 		return
 	}
 
-	s.logger.Debug("User successfully cached.", zap.String("userId", userID.String()))
+	s.logger.Debug("SessionCache: User successfully cached.", zap.String("userId", userID.String()), zap.String("json", string(data)))
 }
 
 func (s *RedisSessionCache) Get(userID uuid.UUID) *CachedUser {
 	serializedUser, err := s.client.Get(context.Background(), getUserKey(userID)).Bytes()
 	if err != nil {
-		s.logger.Error("Error getting user from cache.", zap.Error(err), zap.String("userId", userID.String()))
+		s.logger.Error("SessionCache: Error getting user from cache.", zap.Error(err), zap.String("userId", userID.String()))
 		return nil
 	}
 
 	var cachedUser CachedUser
 	if err = json.Unmarshal(serializedUser, &cachedUser); err != nil {
-		s.logger.Error("Error deserializing user from cache.", zap.Error(err), zap.String("userId", userID.String()))
+		s.logger.Error("SessionCache: Error deserializing user from cache.", zap.Error(err), zap.String("userId", userID.String()))
 		return nil
 	}
 
@@ -180,11 +166,11 @@ func (s *RedisSessionCache) Remove(userID uuid.UUID, sessionExp int64, sessionTo
 	key := getUserKey(userID)
 
 	if err := s.client.Del(context.Background(), key).Err(); err != nil {
-		s.logger.Error("Error adding user to cache.", zap.Error(err), zap.String("userId", userID.String()))
+		s.logger.Error("SessionCache: Error adding user to cache.", zap.Error(err), zap.String("userId", userID.String()))
 		return
 	}
 
-	s.logger.Debug("User deleted from cache.", zap.String("userId", userID.String()))
+	s.logger.Debug("SessionCache: User deleted from cache.", zap.String("userId", userID.String()))
 }
 
 func (s *RedisSessionCache) RemoveAll(userID uuid.UUID) {
@@ -208,11 +194,11 @@ func (s *RedisSessionCache) Ban(userIDs []uuid.UUID) {
 	}
 
 	if err := s.client.Del(context.Background(), userKeys...).Err(); err != nil {
-		s.logger.Error("Error removing user from cache.", zap.Error(err))
+		s.logger.Error("SessionCache: Error removing user from cache.", zap.Error(err))
 		return
 	}
 
-	s.logger.Debug("Users removed from cache.", zap.Strings("userIDs", userKeys))
+	s.logger.Debug("SessionCache: Users banned in cache.", zap.Strings("userIDs", userKeys))
 }
 
 func (s *RedisSessionCache) Unban(userIDs []uuid.UUID) {}
