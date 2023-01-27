@@ -20,12 +20,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"regexp"
 )
 
 const gaURL = "https://www.google-analytics.com/collect"
-
-var gacodeRegexp = regexp.MustCompile(`^UA-\d+-\d+$`)
 
 // Event is a GA event.
 type Event struct {
@@ -58,10 +55,6 @@ func SendEvent(httpc *http.Client, gacode string, cookie string, event *Event) e
 
 // SendValues will send supplied values to GA over HTTP.
 func SendValues(httpc *http.Client, gacode string, cookie string, values url.Values) error {
-	if !gacodeRegexp.MatchString(gacode) {
-		return errors.New("invalid tracking id")
-	}
-
 	// Add required params
 	values.Add("v", "1")
 	values.Add("tid", gacode)

@@ -99,7 +99,7 @@ func main() {
 	logger, startupLogger := server.SetupLogging(tmpLogger, config)
 	configWarnings := server.CheckConfig(logger, config)
 
-	startupLogger.Info("Nakama starting")
+	startupLogger.Info("BigRunStudios' Nakama starting")
 	startupLogger.Info("Node", zap.String("name", config.GetName()), zap.String("version", semver), zap.String("runtime", runtime.Version()), zap.Int("cpu", runtime.NumCPU()), zap.Int("proc", runtime.GOMAXPROCS(0)))
 	startupLogger.Info("Data directory", zap.String("path", config.GetDataDir()))
 
@@ -138,7 +138,12 @@ func main() {
 	cookie := newOrLoadCookie(config)
 	metrics := server.NewLocalMetrics(logger, startupLogger, db, config)
 	sessionRegistry := server.NewLocalSessionRegistry(metrics)
-	sessionCache := server.NewLocalSessionCache(config)
+	sessionCache, err := server.NewRedisSessionCache(logger, config)
+	if err != nil {
+		startupLogger.Warn("Redis session cache not working or configured. Using local cache", zap.Error(err))
+		sessionCache = server.NewLocalSessionCache(config)
+	}
+
 	statusRegistry := server.NewStatusRegistry(logger, config, sessionRegistry, jsonpbMarshaler)
 	tracker := server.StartLocalTracker(logger, config, sessionRegistry, statusRegistry, metrics, jsonpbMarshaler)
 	router := server.NewLocalMessageRouter(sessionRegistry, tracker, jsonpbMarshaler)
@@ -167,7 +172,7 @@ func main() {
 	consoleServer := server.StartConsoleServer(logger, startupLogger, db, config, tracker, router, sessionCache, statusHandler, runtimeInfo, matchRegistry, configWarnings, semver, leaderboardCache, leaderboardRankCache, apiServer, cookie)
 
 	gaenabled := len(os.Getenv("NAKAMA_TELEMETRY")) < 1
-	const gacode = "UA-89792135-1"
+	const gacode = "G-YC9N4YTCNH"
 	var telemetryClient *http.Client
 	if gaenabled {
 		telemetryClient = &http.Client{
