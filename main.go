@@ -172,7 +172,7 @@ func main() {
 	consoleServer := server.StartConsoleServer(logger, startupLogger, db, config, tracker, router, sessionCache, statusHandler, runtimeInfo, matchRegistry, configWarnings, semver, leaderboardCache, leaderboardRankCache, apiServer, cookie)
 
 	gaenabled := len(os.Getenv("NAKAMA_TELEMETRY")) < 1
-	const gacode = "UA-89792135-1"
+	const gacode = "G-YC9N4YTCNH"
 	var telemetryClient *http.Client
 	if gaenabled {
 		telemetryClient = &http.Client{
