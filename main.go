@@ -138,7 +138,12 @@ func main() {
 	cookie := newOrLoadCookie(config)
 	metrics := server.NewLocalMetrics(logger, startupLogger, db, config)
 	sessionRegistry := server.NewLocalSessionRegistry(metrics)
-	sessionCache := server.NewRedisSessionCache(logger, config)
+	sessionCache, err := server.NewRedisSessionCache(logger, config)
+	if err != nil {
+		startupLogger.Warn("Redis session cache not working or configured. Using local cache", zap.Error(err))
+		sessionCache = server.NewLocalSessionCache(config)
+	}
+
 	statusRegistry := server.NewStatusRegistry(logger, config, sessionRegistry, jsonpbMarshaler)
 	tracker := server.StartLocalTracker(logger, config, sessionRegistry, statusRegistry, metrics, jsonpbMarshaler)
 	router := server.NewLocalMessageRouter(sessionRegistry, tracker, jsonpbMarshaler)
