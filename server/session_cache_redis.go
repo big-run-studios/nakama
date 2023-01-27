@@ -70,33 +70,33 @@ func (s *RedisSessionCache) Stop() {
 }
 
 // IsValidSession validates the session token of a user.
-func (s *RedisSessionCache) IsValidSession(userID uuid.UUID, exp int64, token string) bool {
+func (s *RedisSessionCache) IsValidSession(userID uuid.UUID, expSeconds int64, token string) bool {
 	cachedUser := s.getCachedUser(userID)
 	if cachedUser == nil {
 		return false
 	}
 
-	return cachedUser.SessionToken == token && cachedUser.SessionExp >= time.Now().UTC().Unix()
+	return cachedUser.SessionToken == token && cachedUser.SessionTokenExpSeconds >= time.Now().UTC().Unix()
 }
 
 // IsValidRefresh validates the refresh token of a user.
-func (s *RedisSessionCache) IsValidRefresh(userID uuid.UUID, exp int64, token string) bool {
+func (s *RedisSessionCache) IsValidRefresh(userID uuid.UUID, expSeconds int64, token string) bool {
 	cachedUser := s.getCachedUser(userID)
 	if cachedUser == nil {
 		return false
 	}
 
-	return cachedUser.RefreshToken == token && cachedUser.RefreshExp >= time.Now().UTC().Unix()
+	return cachedUser.RefreshToken == token && cachedUser.RefreshTokenExpSeconds >= time.Now().UTC().Unix()
 }
 
 // Add is used when a user should be added to session cache.
-func (s *RedisSessionCache) Add(userID uuid.UUID, sessionExp int64, sessionToken string, refreshExp int64, refreshToken string) {
+func (s *RedisSessionCache) Add(userID uuid.UUID, sessionTokenExpirationSeconds int64, sessionToken string, refreshTokenExpirationSeconds int64, refreshToken string) {
 	cachedUser := CachedUser{
-		UserId:       userID.String(),
-		SessionExp:   sessionExp,
-		SessionToken: sessionToken,
-		RefreshExp:   refreshExp,
-		RefreshToken: refreshToken,
+		UserId:                 userID.String(),
+		SessionTokenExpSeconds: sessionTokenExpirationSeconds,
+		SessionToken:           sessionToken,
+		RefreshTokenExpSeconds: refreshTokenExpirationSeconds,
+		RefreshToken:           refreshToken,
 	}
 
 	data, err := json.Marshal(cachedUser)
@@ -105,9 +105,9 @@ func (s *RedisSessionCache) Add(userID uuid.UUID, sessionExp int64, sessionToken
 		return
 	}
 
-	maxTime := refreshExp
-	if sessionExp > refreshExp {
-		maxTime = sessionExp
+	maxTime := refreshTokenExpirationSeconds
+	if sessionTokenExpirationSeconds > refreshTokenExpirationSeconds {
+		maxTime = sessionTokenExpirationSeconds
 	}
 
 	deletionTime := time.Unix(maxTime, 0)
@@ -174,11 +174,11 @@ func (s *RedisSessionCache) Unban(userIDs []uuid.UUID) {}
 
 // CachedUser is used to serialize/deserialize the user stored in cache
 type CachedUser struct {
-	UserId       string `json:"user_id"`
-	SessionExp   int64  `json:"session_exp"`
-	SessionToken string `json:"session_token"`
-	RefreshExp   int64  `json:"refresh_exp"`
-	RefreshToken string `json:"refresh_token"`
+	UserId                 string `json:"user_id"`
+	SessionTokenExpSeconds int64  `json:"session_token_exp_sec"`
+	SessionToken           string `json:"session_token"`
+	RefreshTokenExpSeconds int64  `json:"refresh_token_exp_sec"`
+	RefreshToken           string `json:"refresh_token"`
 }
 
 // getUserKey given a userId returns the corresponding key to be use in cache

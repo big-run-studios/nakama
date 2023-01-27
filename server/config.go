@@ -572,6 +572,7 @@ func (c *config) GetIAP() *IAPConfig {
 	return c.IAP
 }
 
+// GetCache returns the configuration used for cache purposes
 func (c *config) GetCache() *CacheConfig {
 	return c.Cache
 }
