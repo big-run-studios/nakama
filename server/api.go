@@ -490,7 +490,7 @@ func decompressHandler(logger *zap.Logger, h http.Handler) http.HandlerFunc {
 func extractClientAddressFromContext(logger *zap.Logger, ctx context.Context) (string, string) {
 	var clientAddr string
 	md, _ := metadata.FromIncomingContext(ctx)
-	if ips := md.Get("x-forwarded-for"); len(ips) > 0 {
+	if ips := md.Get("X-Real-Ip"); len(ips) > 0 {
 		// Look for gRPC-Gateway / LB header.
 		clientAddr = strings.Split(ips[0], ",")[0]
 	} else if peerInfo, ok := peer.FromContext(ctx); ok {
@@ -503,7 +503,7 @@ func extractClientAddressFromContext(logger *zap.Logger, ctx context.Context) (s
 
 func extractClientAddressFromRequest(logger *zap.Logger, r *http.Request) (string, string) {
 	var clientAddr string
-	if ips := r.Header.Get("x-forwarded-for"); len(ips) > 0 {
+	if ips := r.Header.Get("X-Real-Ip"); len(ips) > 0 {
 		clientAddr = strings.Split(ips, ",")[0]
 	} else {
 		clientAddr = r.RemoteAddr
