@@ -1,0 +1,21 @@
+session:
+  token_expiry_sec: 15768000
+  refresh_token_expiry_sec: 31536000
+cache:
+  cache_name: candy-mountain::local
+  address: redis:6379
+  password:
+  enable_tls: false
+runtime:
+  http_key: defaultkey
+shutdown_grace_sec: 120
+logger:
+  level: debug
+console:
+  username: "admin"
+  password: "password"
+apple:
+  shared_password:
+google:
+  client_email:
+  private_key:
